@@ -5,7 +5,7 @@ finetune the alignment. The code and help message should be self-explanatory. It
 processes the images in a streaming manner, meaning that the memory usage does
 not depend on the number of input images.
 
-Dependencies: opencv, numpy
+Dependencies: opencv, numpy, cython
 
 ## An example workflow
 
@@ -22,3 +22,10 @@ Dependencies: opencv, numpy
 
 Note: use `--rm-max` and `--rm-min` to remove outliers including cloud and
 airplane/satellite trails.
+
+
+## Notes for deep sky
+
+Sometimes using star point alignment (instead of optical flow) for refinement
+gives better results. Enable it by `--refiner star`. Use `./remove_bg.py` to
+remove sky background.
