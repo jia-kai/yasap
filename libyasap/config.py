@@ -29,7 +29,7 @@ class AlignmentConfig:
     use_identity_trans = False
     """use identity transform to denoise foreground image"""
 
-    refine_abort_thresh = 1.8
+    refine_abort_thresh = 1.5
     """threshold for giving up on the current image"""
 
     star_point_quantile = 0.99

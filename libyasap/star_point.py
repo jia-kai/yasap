@@ -34,8 +34,8 @@ class StarPointRefiner:
         thresh = precise_quantile(img_gray, config.star_point_quantile)
         img_bin = img_gray >= thresh
         if (mask := self._parent._mask) is not None:
-            assert mask.min() >= 0 and mask.max() == 1
-            img_bin *= mask
+            assert mask.dtype == np.uint8
+            img_bin *= (mask >= 1)
 
         star_pt = find_star_centers(
             img_gray * img_bin, config.star_point_min_area,

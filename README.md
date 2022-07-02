@@ -24,8 +24,9 @@ Note: use `--rm-max` and `--rm-min` to remove outliers including cloud and
 airplane/satellite trails.
 
 
-## Notes for deep sky
+## Notes
 
-Sometimes using star point alignment (instead of optical flow) for refinement
-gives better results. Enable it by `--refiner star`. Use `./remove_bg.py` to
-remove sky background.
+* Sometimes using star point alignment (instead of optical flow) for refinement
+   gives better results. This mode was added recently, and I am not sure if it
+   is always better than optical flow. Enable it by `--refiner star`.
+* Use `./remove_bg.py` to remove sky background.
