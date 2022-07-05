@@ -1,6 +1,6 @@
 from .utils import (logger, disp_img, precise_quantile, get_mask_for_largest,
                     perspective_transform, find_homography, disp_match_pairs,
-                    in_bounding_box)
+                    in_bounding_box, format_relative_aa_bbox, avg_l2_dist)
 from .config import AlignmentConfig
 
 import pyximport
@@ -96,7 +96,10 @@ class StarPointRefiner:
                 logger.warning(f'discard due to too few matches: {dist[mask]}')
                 return
 
-            H, err = find_homography(H_src, H_dst, 0)
+            if iter_ == 0:
+                err_init = avg_l2_dist(src_pt_H[mask], H_dst)
+
+            H, err, err_max = find_homography(H_src, H_dst, 0)
 
             if err < config.star_point_icp_stop_err or np.allclose(H, prev_H):
                 break
@@ -121,7 +124,10 @@ class StarPointRefiner:
                     self._first_img_gray_8u, H_dst,
                     (img_gray * 255).astype(np.uint8), H_src)
 
-        logger.info(f'star point ICP: iter={iter_+1} {err=:.3g} '
-                    f'selected={mask.sum()}({mask.sum()/len(src_pt)*100:.1f}%)')
+        logger.info(f'star point ICP: iter={iter_+1} '
+                    f'selected={mask.sum()}({mask.sum()/len(src_pt)*100:.1f}%) '
+                    f'bbox={format_relative_aa_bbox(H_dst, img_gray.shape)}\n'
+                    f'  err:{err_init:.3g}->{err:.3g},{err_max:.3g}'
+                    )
 
         return H, err

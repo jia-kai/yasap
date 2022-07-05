@@ -15,15 +15,15 @@ class CustomFormatter(logging.Formatter):
     magenta = "\x1b[35m"
     cyan = "\x1b[36m"
     reset = "\x1b[0m"
-    format = ('%(relativeCreated).2fs - %(name)s - %(levelname)s - '
+    format_str = ('%(relativeCreated).2fs - %(name)s - %(levelname)s - '
               '%(message)s (%(filename)s:%(lineno)d)')
 
     FORMATS = {
-        logging.DEBUG: cyan + format + reset,
-        logging.INFO: green + format + reset,
-        logging.WARNING: yellow + format + reset,
-        logging.ERROR: red + format + reset,
-        logging.CRITICAL: bold_red + format + reset
+        logging.DEBUG: cyan + format_str + reset,
+        logging.INFO: green + format_str + reset,
+        logging.WARNING: yellow + format_str + reset,
+        logging.ERROR: red + format_str + reset,
+        logging.CRITICAL: bold_red + format_str + reset
     }
 
     def format(self, record):
@@ -32,7 +32,7 @@ class CustomFormatter(logging.Formatter):
         formatter = logging.Formatter(log_fmt)
         return formatter.format(record)
 
-def setup_logger():
+def setup_logger(file_path=None):
     logger.setLevel(logging.DEBUG)
 
     # create console handler with a higher log level
@@ -40,6 +40,12 @@ def setup_logger():
     ch.setLevel(logging.DEBUG)
     ch.setFormatter(CustomFormatter())
     logger.addHandler(ch)
+
+    if file_path:
+        chf = logging.FileHandler(file_path, 'w')
+        chf.setLevel(logging.DEBUG)
+        chf.setFormatter(logging.Formatter(CustomFormatter.format_str))
+        logger.addHandler(chf)
 
 def perspective_transform(H: np.ndarray, pts: np.ndarray):
     # compute perspective transform and compare results with opencv to check
@@ -73,13 +79,16 @@ def pairwise_l2_dist(x: np.ndarray, y: np.ndarray) -> np.ndarray:
 def avg_l2_dist(x: np.ndarray, y: np.ndarray) -> float:
     return float(pairwise_l2_dist(x, y).mean())
 
+def max_l2_dist(x: np.ndarray, y: np.ndarray) -> float:
+    return float(pairwise_l2_dist(x, y).max())
+
 def find_homography(src, dst, method):
-    """:return: H, avg dist"""
+    """:return: H, avg dist, max dist"""
     assert src.shape == dst.shape and src.shape[0] >= 4 and src.ndim == 2, (
         src.shape, dst.shape)
     H, _ = cv2.findHomography(src, dst, method)
-    dist = avg_l2_dist(perspective_transform(H, src), dst)
-    return H, dist
+    t = perspective_transform(H, src)
+    return H, avg_l2_dist(t, dst), max_l2_dist(t, dst)
 
 def disp_img(title: str, img: np.ndarray, wait=True):
     """display an image while handling the keys"""
@@ -157,3 +166,15 @@ def read_img(fpath: str) -> np.ndarray:
     assert img is not None, f'failed to read {fpath}'
     img = img.astype(np.float32) / np.float32(np.iinfo(img.dtype).max)
     return img
+
+def format_relative_aa_bbox(pts: np.ndarray, img_shape: tuple[int]) -> str:
+    """compute the axis-aligned bounding box for a set of points relative to an
+    image shape and format it as a string
+
+    :param img_shape: (h, w, ch) or (h, w)
+    """
+    assert pts.ndim == 2 and pts.shape[1] == 2
+    h, w = img_shape[:2]
+    x0, y0 = np.min(pts, axis=0) / [w, h]
+    x1, y1 = np.max(pts, axis=0) / [w, h]
+    return f'({x0:.2f},{y0:.2f};w={x1-x0:.2f},h={y1-y0:.2f})'

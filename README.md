@@ -31,16 +31,17 @@ airplane/satellite trails.
 ## Details & notes
 
 * YASAP processes the images in a streaming manner and maintains a working
-  memory with a constant size.
+  memory bounded by constant size.
 * YASAP uses a numerically stable algorithm to compute the mean image.
 * The input images should be given in time order if no tracking equipment was
   used during shooting. Each image is first matched with the previous image
   assuming a small displacement. The transformation is then refined against the
   first image.
 * Perhaps counterintuitively at first glance, the correct transformation is
-  homography (eight degrees of freedom) instead of Euclidean transformation
-  (rotation and translation) even if we assume an ideal pinhole camera model and
-  infinitely far pinpoint stars (unless you have a spherical sensor).
+  homography (eight degrees of freedom) instead of affine transformation (six
+  degrees of freedom) even if we assume an ideal pinhole camera model and
+  infinitely far pinpoint stars (unless you have a spherical sensor), especially
+  for wide-angle photos.
 * Sometimes using star point alignment (instead of optical flow) for refinement
   gives better results. This mode was added recently, and I am not sure if it is
   always better than optical flow. Enable it by `--refiner star`.

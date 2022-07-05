@@ -2,7 +2,7 @@ from .config import AlignmentConfig
 from .star_point import StarPointRefiner
 from .utils import (perspective_transform, in_bounding_box, avg_l2_dist,
                     find_homography, disp_img, logger, get_mask_for_largest,
-                    disp_match_pairs, read_img)
+                    disp_match_pairs, read_img, format_relative_aa_bbox)
 
 import cv2
 import numpy as np
@@ -56,12 +56,13 @@ class OpticalFlowRefiner:
         """
         warp_as_dst = cv2.warpPerspective(img_gray, H, self._parent._out_shape)
         nr_orig, p0, p1 = self._get_matched_points(H, warp_as_dst)
-        Href, err = find_homography(p1, p0, 0)    # least squares
+        Href, err, err_max = find_homography(p1, p0, 0)    # least squares
 
         logger.info(
             f'refine: filter_pts={nr_orig}->{len(p0)} '
-            f'dist_before={avg_l2_dist(p0, p1):.3g} '
-            f'dist_aligned={err:.3g} ')
+            f'bbox={format_relative_aa_bbox(p0, img_gray.shape)}\n'
+            f'  err:{avg_l2_dist(p0, p1):.3g}->{err:.3g},{err_max:.3g} '
+        )
 
         config = self._parent._config
         if err >= config.refine_abort_thresh:
@@ -156,7 +157,7 @@ class ImageStackAlignment:
                 'coarse', prev_ftr, ftr)
             # note: due to the rotation of camera plane, we do need perspective
             # transforms
-            H, H_err_c = find_homography(p1xy, p0xy, cv2.RANSAC)
+            H, H_err_c, _ = find_homography(p1xy, p0xy, cv2.RANSAC)
 
             if self._config.draw_matches:
                 print(H)

@@ -39,6 +39,7 @@ def main():
     parser.add_argument('--refiner', default='opt', choices=REFINER_MAP.keys(),
                         help='choose the refiner algorithm; `star` might be '
                         'better for deep sky imaging. See code for more info')
+    parser.add_argument('--log', help='also write log to file')
     for i in dir(AlignmentConfig):
         if i.startswith('_'):
             continue
@@ -59,7 +60,7 @@ def main():
 
     args = parser.parse_args()
 
-    setup_logger()
+    setup_logger(args.log)
     np.set_printoptions(suppress=True)
 
     config = AlignmentConfig()
