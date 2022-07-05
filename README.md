@@ -1,16 +1,16 @@
 # YASAP: Yet Anothe Star Alignment Program
 
-This script uses SURF to align images and the iterative Lucas-Kanade method to
-finetune the alignment. The code and help message should be self-explanatory. It
-processes the images in a streaming manner, meaning that the memory usage does
-not depend on the number of input images.
+This script uses SURF to align images and the iterative Lucas-Kanade sparse
+optical flow to finetune the alignment. It assumes multiple shots of the same
+target with similar views and stacks these shots to denoise.
 
 Dependencies: opencv, numpy, cython
 
 ## An example workflow
 
 1. Shoot the milky way using high ISO and fast shutter to get pinpoint stars.
-2. Convert the raw files to TIFF images in Darktable.
+2. Convert the raw files to TIFF images in Darktable. Enable lens correction if
+   possible.
 3. Create star mask (i.e., a large area that contains most of the sky for
    alignment) using GIMP.
 4. Run YASAP to merge the stack:
@@ -24,13 +24,23 @@ Dependencies: opencv, numpy, cython
             --rm-min=1 --rm-max=1
 5. Merge the two images in GIMP.
 
-
 Note: use `--rm-max` and `--rm-min` to remove outliers including cloud and
 airplane/satellite trails.
 
 
-## Notes
+## Details & notes
 
+* YASAP processes the images in a streaming manner and maintains a working
+  memory with a constant size.
+* YASAP uses a numerically stable algorithm to compute the mean image.
+* The input images should be given in time order if no tracking equipment was
+  used during shooting. Each image is first matched with the previous image
+  assuming a small displacement. The transformation is then refined against the
+  first image.
+* Perhaps counterintuitively at first glance, the correct transformation is
+  homography (eight degrees of freedom) instead of Euclidean transformation
+  (rotation and translation) even if we assume an ideal pinhole camera model and
+  infinitely far pinpoint stars (unless you have a spherical sensor).
 * Sometimes using star point alignment (instead of optical flow) for refinement
   gives better results. This mode was added recently, and I am not sure if it is
   always better than optical flow. Enable it by `--refiner star`.

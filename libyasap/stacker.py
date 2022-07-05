@@ -4,7 +4,8 @@ class StreamingStacker:
     """stacking a stream of aligned images"""
 
     INF_VAL = 2.3
-    _sum_img = None
+
+    _mean_img = None
 
     _min_list = None
     """lowest N values"""
@@ -31,22 +32,29 @@ class StreamingStacker:
             dst[i] = new
             del new
 
-    def add_img(self, img, mask):
+    def add_img(self, img: np.ndarray, mask: np.ndarray):
         assert (img.dtype == np.float32 and mask.dtype == np.bool_ and
                 mask.shape == img.shape[:2] and
                 img.ndim == 3 and img.shape[2] == 3), (img.shape, mask.shape)
-        if self._sum_img is None:
-            assert np.all(mask)
-            self._sum_img = np.zeros_like(img)
-            self._cnt_img = np.zeros_like(img[:, :, 0], dtype=np.int16)
-            fill = np.empty_like(self._sum_img)
+        if self._mean_img is None:
+            assert np.all(mask), 'first image must be all valid'
+            self._mean_img = img.copy()
+            self._cnt_img = np.ones_like(img[:, :, 0], dtype=np.int16)
+            fill = np.empty_like(self._mean_img)
             fill[:] = self.INF_VAL
             self._min_list = [fill.copy() for _ in range(self.rm_min)]
             self._max_list = [fill.copy() for _ in range(self.rm_max)]
             del fill
-
-        self._sum_img += img * np.expand_dims(mask, 2)
-        self._cnt_img += mask
+        else:
+            # let u[n] = sum(x[1:n+1])/n
+            # then u[n] = u[n - 1] + (x[n] - u[n - 1]) / n
+            self._cnt_img += mask
+            d = img - self._mean_img
+            d *= np.expand_dims(
+                mask.astype(np.float32) / self._cnt_img.astype(np.float32),
+                2)
+            self._mean_img += d
+            del d
 
         if self.rm_min or self.rm_max:
             img = img.copy()
@@ -78,28 +86,34 @@ class StreamingStacker:
         return r
 
     def get_result(self):
-        s = self._sum_img.copy()
+        if not (self._max_list or self._min_list):
+            return self._mean_img
 
-        has_remove = self._max_list or self._min_list
+        minmax_cnt = np.zeros_like(self._cnt_img)
+        sub = None
 
-        # removing extreme values from s
-        if has_remove:
-            minmax_cnt = np.zeros_like(self._cnt_img)
         if self._min_list:
-            s -= self._sum_list_non_inf(self._min_list, minmax_cnt)
+            sub = self._sum_list_non_inf(self._min_list, minmax_cnt)
         if self._max_list:
-            # max list has been negated
-            s += self._sum_list_non_inf(self._max_list, minmax_cnt)
+            # note that max list has been negated
+            c = self._sum_list_non_inf(self._max_list, minmax_cnt)
+            if sub is None:
+                sub = c
+                sub = np.negative(sub, out=sub)
+            else:
+                sub -= c
+            del c
+
+        # (mean * n - sub) / (n - k) = mean - (sub - mean * k) / (n - k)
+
         tot_cnt = np.expand_dims(self._cnt_img, 2)
-        if has_remove:
-            minmax_cnt = np.expand_dims(minmax_cnt, 2)
-            s /= np.maximum(tot_cnt - minmax_cnt, 1)
-            tot_cnt = np.broadcast_to(tot_cnt, s.shape)
-            edge = tot_cnt <= self.rm_min + self.rm_max
-            s[edge] = self._sum_img[edge] / tot_cnt[edge]
-        else:
-            s /= tot_cnt
-        return s
+        minmax_cnt = np.expand_dims(minmax_cnt, 2)
+        sub -= self._mean_img * minmax_cnt
+        sub /= np.maximum(tot_cnt - minmax_cnt, 1)
+        edge = np.broadcast_to(tot_cnt <= self.rm_min + self.rm_max, sub.shape)
+        sub[edge] = 0
+
+        return self._mean_img - sub
 
 def run_random_test():
     import sys
@@ -150,6 +164,7 @@ def run_random_test():
                     sys.exit(1)
 
     run(3, 3, 2, 0, 0)
+    run(3, 3, 3, 0, 1)
     run(3, 3, 3, 1, 0)
     run(3, 3, 8, 0, 1)
     run(3, 3, 8, 1, 1)
