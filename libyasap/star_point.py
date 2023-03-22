@@ -106,7 +106,7 @@ class StarPointRefiner:
 
             prev_H = H
 
-            if err >= config.align_err_disp_threh:
+            if err >= config.align_err_disp_thresh or config.star_point_disp:
                 logger.info(
                     f'iter {iter_}: {err=:.3g} '
                     f'selected={mask.sum()}({mask.sum()/len(src_pt):.2f})'

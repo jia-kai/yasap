@@ -61,7 +61,7 @@ class OpticalFlowRefiner:
         logger.info(
             f'refine: filter_pts={nr_orig}->{len(p0)} '
             f'bbox={format_relative_aa_bbox(p0, img_gray.shape)}\n'
-            f'  err:{avg_l2_dist(p0, p1):.3g}->{err:.3g},{err_max:.3g} '
+            f'  err:{avg_l2_dist(p0, p1):.3g}->{err:.3g} max={err_max:.3g} '
         )
 
         config = self._parent._config
@@ -69,7 +69,7 @@ class OpticalFlowRefiner:
             logger.warning(f'image discarded due to high error {err:.3g}')
             return
 
-        if err >= config.align_err_disp_threh:
+        if err >= config.align_err_disp_thresh:
             disp_match_pairs(
                 self._first_img_gray_8u, p0,
                 (warp_as_dst * 255).astype(np.uint8), p1)
@@ -130,10 +130,22 @@ class ImageStackAlignment:
             assert self._out_shape == (w, h)
         return self._handle_image(img)
 
+    def _img_preproc(self, src: np.ndarray) -> np.ndarray:
+        """preprocess an input gray image"""
+        if not self._config.remove_bg:
+            return src
+        flat = src
+        if self._mask is not None:
+            flat = flat[self._mask > 127]
+        thresh = np.quantile(flat.flatten(), self._config.remove_bg_thresh)
+        src = np.maximum(src - thresh, 0)
+        src /= src.max()
+        return src
+
     def _handle_image(self, img):
         if self._config.use_identity_trans:
             return img, np.ones_like(img[:, :, 0], dtype=np.bool_)
-        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        img_gray = self._img_preproc(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
         img_gray_8u = (img_gray * 255).astype(np.uint8)
         if not self._config.skip_coarse_align:
             prev_ftr = self._prev_ftr
@@ -151,7 +163,6 @@ class ImageStackAlignment:
         # coarse align
         if self._config.skip_coarse_align:
             H = np.eye(3, dtype=np.float32)
-            H_err_c = 0.0
         else:
             matches, p0xy, p1xy = self._compute_matches(
                 'coarse', prev_ftr, ftr)
@@ -169,7 +180,7 @@ class ImageStackAlignment:
                     flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS))
                 self._prev_img = img_gray_8u
 
-        logger.debug(f'coarse: dist_aligned={H_err_c:.2g}')
+            logger.debug(f'coarse: dist_aligned={H_err_c:.2g}')
 
         H = self._refiner.get_trans(self._prev_trans @ H, img_gray)
 
@@ -203,7 +214,8 @@ class ImageStackAlignment:
         """:return: ftr points, desc array as by opencv"""
         ftr, desc = self._detector.detectAndCompute(img, self._mask)
         k = self._config.max_ftr_points
-        if desc.shape[0] <= k:
+        assert len(ftr), 'no feature points detected'
+        if len(ftr) <= k:
             return ftr, desc
 
         mask = get_mask_for_largest(np.array([i.response for i in ftr]), k)
@@ -221,7 +233,7 @@ class ImageStackAlignment:
         kp0, desc0 = ftr0
         kp1, desc1 = ftr1
 
-        assert len(kp0) and len(kp1)
+        assert len(kp0) and len(kp1), 'no key points detected'
         matches = self._matcher.match(desc0, desc1)
 
         def select_kpxy():

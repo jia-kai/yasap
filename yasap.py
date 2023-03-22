@@ -5,9 +5,10 @@ from libyasap.alignment import ImageStackAlignment, OpticalFlowRefiner
 from libyasap.star_point import StarPointRefiner
 from libyasap.config import AlignmentConfig
 from libyasap.stacker import StreamingStacker
-from libyasap.utils import setup_logger, logger, save_img
+from libyasap.utils import setup_logger, logger, save_img, disp_img
 
 import numpy as np
+import cv2
 
 import argparse
 import gc
@@ -16,6 +17,22 @@ REFINER_MAP = {
     'opt': OpticalFlowRefiner,
     'star': StarPointRefiner,
 }
+
+def visualize(aligned, cur_result):
+    if aligned is None:
+        aligned = (np.zeros_like(cur_result),
+                   np.zeros_like(cur_result, dtype=bool))
+    def imshow(x, title):
+        img = (np.clip(x, 0, 1) * 255).astype(np.uint8)
+        disp_img(title, img, wait=False, max_size=500)
+
+    r, m = aligned
+    r = r.copy()
+    r[~m] *= 0.8
+    imshow(r, 'aligned')
+    imshow(cur_result, 'result')
+    cv2.waitKey(1)
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -39,34 +56,18 @@ def main():
     parser.add_argument('--refiner', default='opt', choices=REFINER_MAP.keys(),
                         help='choose the refiner algorithm; `star` might be '
                         'better for deep sky imaging. See code for more info')
+    parser.add_argument('-v', '--visualize', action='store_true',
+                        help='visualize internal results')
     parser.add_argument('--log', help='also write log to file')
-    for i in dir(AlignmentConfig):
-        if i.startswith('_'):
-            continue
-        v = getattr(AlignmentConfig, i)
-        i = i.replace('_', '-')
-        kw = dict(help='see AlignmentConfig class')
-        if type(v) is bool:
-            if v:
-                i = 'no-' + i
-                kw['action'] = 'store_false'
-                kw['dest'] = i
-            else:
-                kw['action'] = 'store_true'
-        else:
-            kw['type'] = type(v)
-            kw['default'] =v
-        parser.add_argument(f'--{i}', **kw)
+    AlignmentConfig.add_to_parser(parser)
 
     args = parser.parse_args()
 
     setup_logger(args.log)
     np.set_printoptions(suppress=True)
 
-    config = AlignmentConfig()
-    for i in dir(AlignmentConfig):
-        if not i.startswith('_'):
-            setattr(config, i, getattr(args, i))
+    config = AlignmentConfig().update_from_args(args)
+
     align = ImageStackAlignment(config, REFINER_MAP[args.refiner]())
     if args.mask:
         align.set_mask_from_file(args.mask)
@@ -78,6 +79,8 @@ def main():
             discard_list.append(i)
         else:
             stacker.add_img(*aligned)
+        if args.visualize:
+            visualize(aligned, stacker.get_preview_result())
         gc.collect()
     save_img(stacker.get_result(), args.output)
     logger.info(f'discarded images: {len(discard_list)} {discard_list}')

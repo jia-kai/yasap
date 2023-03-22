@@ -90,12 +90,12 @@ def find_homography(src, dst, method):
     t = perspective_transform(H, src)
     return H, avg_l2_dist(t, dst), max_l2_dist(t, dst)
 
-def disp_img(title: str, img: np.ndarray, wait=True):
+def disp_img(title: str, img: np.ndarray, wait=True, max_size: int=1000):
     """display an image while handling the keys"""
     if img.dtype == np.bool_:
         img = (img * 255).astype(np.uint8)
 
-    scale = 1000 / max(img.shape)
+    scale = max_size / max(img.shape)
     if scale < 1:
         img = cv2.resize(img, (0, 0), fx=scale, fy=scale,
                          interpolation=cv2.INTER_AREA)

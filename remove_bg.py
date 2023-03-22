@@ -17,10 +17,10 @@ def main():
                         required=True)
     parser.add_argument('-o', '--output', help='output image',
                         required=True)
-    parser.add_argument('--gaussian-frac', default=0.1, type=float,
+    parser.add_argument('--gaussian-frac', default=0.01, type=float,
                         help='Gaussian kernel size for row smoothing '
                         'relative to image height')
-    parser.add_argument('--min-rank', default=3, type=int,
+    parser.add_argument('--min-rank', default=0.05, type=float,
                         help='rank of minimal value to be selected')
     parser.add_argument('--disp-bg', action='store_true',
                         help='display inferred background image')
@@ -29,10 +29,10 @@ def main():
     img = read_img(args.input)
     assert img.ndim == 3 and img.shape[2] == 3
     print(f'image shape: {img.shape}')
-    assert img.shape[1] > img.shape[0], 'we assume landscape orientation'
 
+    min_rank = int(round(args.min_rank * img.shape[1]))
     row_min = np.expand_dims(
-        np.partition(img, args.min_rank, axis=1)[:, args.min_rank],
+        np.partition(img, min_rank, axis=1)[:, min_rank],
         1)
     ksize = int(args.gaussian_frac * img.shape[0])
     ksize += (ksize + 1) % 2

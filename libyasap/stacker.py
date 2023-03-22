@@ -1,16 +1,18 @@
 import numpy as np
 
+import typing
+
 class StreamingStacker:
     """stacking a stream of aligned images"""
 
     INF_VAL = 2.3
 
-    _mean_img = None
+    _mean_img: typing.Optional[np.ndarray] = None
 
-    _min_list = None
+    _min_list: typing.Optional[list[np.ndarray]] = None
     """lowest N values"""
 
-    _max_list = None
+    _max_list: typing.Optional[list[np.ndarray]] = None
     """lowest N values of negative images"""
 
     def __init__(self, rm_min: int, rm_max: int):
@@ -85,7 +87,14 @@ class StreamingStacker:
                 r += i
         return r
 
-    def get_result(self):
+    def get_preview_result(self) -> np.ndarray:
+        """get result for preview, which is fast"""
+        assert self._mean_img is not None
+        return self._mean_img
+
+    def get_result(self) -> np.ndarray:
+        """get the final result"""
+        assert self._mean_img is not None
         if not (self._max_list or self._min_list):
             return self._mean_img
 
