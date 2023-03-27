@@ -73,10 +73,11 @@ def main():
         align.set_mask_from_file(args.mask)
     stacker = StreamingStacker(args.rm_min, args.rm_max)
     discard_list = []
-    for i in args.imgs:
-        aligned = align.feed_image_file(i)
+    for idx, path in enumerate(args.imgs):
+        logger.info(f'working on {idx}/{len(args.imgs)}: {path}')
+        aligned = align.feed_image_file(path)
         if aligned is None:
-            discard_list.append(i)
+            discard_list.append(path)
         else:
             stacker.add_img(*aligned)
         if args.visualize:

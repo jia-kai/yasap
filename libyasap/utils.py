@@ -146,12 +146,30 @@ def get_mask_for_largest(x: np.ndarray, n: int):
     assert (g := np.sum(mask)) == n, (g, n)
     return mask
 
+def write_exr_f32(img: np.ndarray, fpath: str):
+    import OpenEXR
+    import Imath
+    assert img.ndim == 3 and img.shape[2] == 3 and img.dtype == np.float32
+    header = OpenEXR.Header(img.shape[1], img.shape[0])
+    f32_chan = Imath.Channel(Imath.PixelType(Imath.PixelType.FLOAT))
+    header['channels'] = dict([(c, f32_chan) for c in 'RGB'])
+    out = OpenEXR.OutputFile(fpath, header)
+    R = (img[:,:,0]).tobytes()
+    G = (img[:,:,1]).tobytes()
+    B = (img[:,:,2]).tobytes()
+    out.writePixels({'R' : R, 'G' : G, 'B' : B})
+    out.close()
+
 def save_img(img: np.ndarray, fpath: str):
     """save image to file"""
     assert img.dtype == np.float32
     if fpath.endswith('.npy'):
         np.save(fpath, img)
         return
+    if fpath.endswith('.exr'):
+        write_exr_f32(img, fpath)
+        return
+
     img = (np.clip(img, 0, 1) * 65535).astype(np.uint16)
     succ = cv2.imwrite(fpath, img)
     assert succ, f'failed to write image {fpath}'

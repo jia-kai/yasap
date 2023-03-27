@@ -190,7 +190,7 @@ class ImageStackAlignment:
         H, err = H
 
         if err >= self._config.refine_abort_thresh:
-            logger.warning('image discarded due to high error: {err:.3g}')
+            logger.warning(f'image discarded due to high error: {err:.3g}')
             return
 
         self._error_stat.append(err)
@@ -246,6 +246,10 @@ class ImageStackAlignment:
         kp0_xy, kp1_xy = select_kpxy()
         dist = np.sqrt(((kp0_xy - kp1_xy)**2).sum(axis=1))
         mask = dist <= maxdist
+        if np.count_nonzero(mask) < 4:
+            raise ValueError(f'not enough matches: '
+                             f'dist={dist/self._out_shape[0]} {mask=};'
+                             ' consider increasing --ftr-match-coord-dist')
         matches = np.array(matches)[mask]
         matches = sorted(matches, key=lambda x: x.distance)
         logger.info(f'{log_name} matching: num={len(matches)}/{len(mask)} '

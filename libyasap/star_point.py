@@ -99,7 +99,7 @@ class StarPointRefiner:
             if iter_ == 0:
                 err_init = avg_l2_dist(src_pt_H[mask], H_dst)
 
-            H, err, err_max = find_homography(H_src, H_dst, 0)
+            H, err, err_max = find_homography(H_src, H_dst, cv2.RANSAC)
 
             if err < config.star_point_icp_stop_err or np.allclose(H, prev_H):
                 break

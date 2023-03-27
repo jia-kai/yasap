@@ -17,18 +17,23 @@ def main():
                         required=True)
     parser.add_argument('-o', '--output', help='output image',
                         required=True)
-    parser.add_argument('--gaussian-frac', default=0.01, type=float,
+    parser.add_argument('--gaussian-frac', default=0.02, type=float,
                         help='Gaussian kernel size for row smoothing '
                         'relative to image height')
-    parser.add_argument('--min-rank', default=0.05, type=float,
+    parser.add_argument('--min-rank', default=0.02, type=float,
                         help='rank of minimal value to be selected')
     parser.add_argument('--disp-bg', action='store_true',
                         help='display inferred background image')
+    parser.add_argument('--roi', help='clip ROI: (x,y,w,h) in pixels')
     args = parser.parse_args()
 
     img = read_img(args.input)
     assert img.ndim == 3 and img.shape[2] == 3
     print(f'image shape: {img.shape}')
+
+    if args.roi:
+        x, y, w, h = map(int, args.roi.split(','))
+        img = img[y:y+h, x:x+w]
 
     min_rank = int(round(args.min_rank * img.shape[1]))
     row_min = np.expand_dims(
