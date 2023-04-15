@@ -8,6 +8,48 @@ import numpy as np
 
 import argparse
 
+def work(img: np.ndarray, args) -> np.ndarray:
+    img_orig = img.copy()
+
+    min_rank = int(round(args.min_rank * img.shape[1]))
+    row_min = np.expand_dims(
+        np.partition(img, min_rank, axis=1)[:, min_rank],
+        1)
+    ksize = int(args.gaussian_frac * img.shape[0])
+    ksize += (ksize + 1) % 2
+    row_min = cv2.GaussianBlur(row_min, (1, ksize), 0)
+
+    img -= row_min
+    img = np.clip(img, 0, 1, out=img)
+    vmin = img.min()
+    vmax = img.max()
+    img -= vmin
+    img *= 1 / (vmax - vmin)
+
+    if args.mask:
+        mask = read_img(args.mask)
+        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+        if mask.dtype == np.uint8:
+            mask = mask.astype(np.float32) / 255
+        elif mask.dtype == np.uint16:
+            mask = mask.astype(np.float32) / 65535
+        else:
+            assert mask.dtype == np.float32, (
+                f'unhandled mask dtype {mask.dtype}'
+            )
+        if mask.ndim == 2:
+            mask = np.expand_dims(mask, 2)
+        img = img * mask + img_orig * (1 - mask)
+
+    if args.verbose:
+        disp_img('input', img_orig, wait=False)
+        disp_img('output', img, wait=False)
+        disp_img('bg', np.broadcast_to(row_min, img.shape))
+
+    print(f'bg mean: {np.mean(row_min):.3g}')
+    print(f'rescale: {vmin:.3g} {vmax: .3g}')
+    return img
+
 def main():
     parser = argparse.ArgumentParser(
         description='remove background and linear rescale for deep sky images',
@@ -17,14 +59,18 @@ def main():
                         required=True)
     parser.add_argument('-o', '--output', help='output image',
                         required=True)
+    parser.add_argument('--skip', action='store_true',
+                        help='skip bg removal; useful as format converter')
     parser.add_argument('--gaussian-frac', default=0.02, type=float,
                         help='Gaussian kernel size for row smoothing '
                         'relative to image height')
     parser.add_argument('--min-rank', default=0.02, type=float,
                         help='rank of minimal value to be selected')
-    parser.add_argument('--disp-bg', action='store_true',
-                        help='display inferred background image')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='display internal results')
     parser.add_argument('--roi', help='clip ROI: (x,y,w,h) in pixels')
+    parser.add_argument('--mask', help='use another image as a mask for '
+                        'applying bg removal')
     args = parser.parse_args()
 
     img = read_img(args.input)
@@ -35,26 +81,10 @@ def main():
         x, y, w, h = map(int, args.roi.split(','))
         img = img[y:y+h, x:x+w]
 
-    min_rank = int(round(args.min_rank * img.shape[1]))
-    row_min = np.expand_dims(
-        np.partition(img, min_rank, axis=1)[:, min_rank],
-        1)
-    ksize = int(args.gaussian_frac * img.shape[0])
-    ksize += (ksize + 1) % 2
-    row_min = cv2.GaussianBlur(row_min, (1, ksize), 0)
-    if args.disp_bg:
-        disp_img('input', img, wait=False)
-        disp_img('bg', np.broadcast_to(row_min, img.shape))
+    if not args.skip:
+        img = work(img, args)
 
-    img -= row_min
-    img = np.clip(img, 0, 1, out=img)
-    vmin = img.min()
-    vmax = img.max()
-    img -= vmin
-    img *= 1 / (vmax - vmin)
     save_img(img, args.output)
-    print(f'bg mean: {np.mean(row_min):.3g}')
-    print(f'rescale: {vmin:.3g} {vmax: .3g}')
 
 if __name__ == '__main__':
     main()

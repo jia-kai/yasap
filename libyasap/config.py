@@ -1,6 +1,7 @@
 import argparse
 import inspect
 import ast
+import itertools
 
 class DocStringExtractor(ast.NodeVisitor):
     name2doc: dict[str, str]
@@ -19,34 +20,53 @@ class DocStringExtractor(ast.NodeVisitor):
             if (isinstance(i, ast.Expr) and
                     isinstance(c := i.value, ast.Constant) and
                     isinstance(doc := c.value, str)):
-                if (isinstance(prev, ast.Assign) and
-                        len(prev.targets) == 1 and
-                        isinstance(n := prev.targets[0], ast.Name) and
-                        isinstance(n.ctx, ast.Store)):
-                    self.name2doc[n.id] = inspect.cleandoc(doc)
 
+                def chk_name(t):
+                    if isinstance(t, ast.Name) and isinstance(t.ctx, ast.Store):
+                        self.name2doc[t.id] = inspect.cleandoc(doc)
+
+                if (isinstance(prev, ast.Assign) and
+                        len(prev.targets) == 1):
+                    chk_name(prev.targets[0])
+                elif isinstance(prev, ast.AnnAssign):
+                    chk_name(prev.target)
             prev = i
 
 
 class ConfigWithArgparse:
     """a base class for configuration with argparse support"""
 
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            if not hasattr(self, k):
+                raise AttributeError(f'invalid {k} for config {type(self)}')
+            setattr(self, k, v)
+
     def update_from_args(self, args) -> "Self":
-        for i in type(self).__dict__.keys():
-            if not i.startswith('_'):
-                setattr(self, i, getattr(args, i))
+        for i in self._iter_config_keys():
+            setattr(self, i, getattr(args, i))
         return self
+
+    @classmethod
+    def _iter_config_keys(cls):
+        for k, v in cls.__dict__.items():
+            if not k.startswith('_') and not callable(v):
+                yield k
 
     @classmethod
     def add_to_parser(cls, parser: argparse.ArgumentParser):
         """add class attributes to parser"""
-        src = '\n'.join(inspect.getsourcelines(cls)[0])
+        lines = inspect.getsourcelines(cls)[0]
+        num_space = min(
+            sum(1 for _ in itertools.takewhile(str.isspace, l))
+            for l in lines if (l and not l.isspace())
+        )
+        lines = [i[num_space:] for i in lines]
+        src = '\n'.join(lines)
         doc = DocStringExtractor()
         doc.visit(ast.parse(src))
-        for i in cls.__dict__.keys():
-            if i.startswith('_'):
-                continue
-            kw = dict(help=f'{cls.__name__}: {doc.name2doc[i]}')
+        for i in cls._iter_config_keys():
+            kw = dict(help=f'{cls.__qualname__}: {doc.name2doc[i]}')
             v = getattr(cls, i)
             i = i.replace('_', '-')
             if type(v) is bool:
@@ -60,6 +80,7 @@ class ConfigWithArgparse:
                 kw['type'] = type(v)
                 kw['default'] = v
             parser.add_argument(f'--{i}', **kw)
+
 
 class AlignmentConfig(ConfigWithArgparse):
     """default configuration options"""
@@ -98,7 +119,7 @@ class AlignmentConfig(ConfigWithArgparse):
     use_identity_trans = False
     """use identity transform to denoise foreground image"""
 
-    refine_abort_thresh = 1.5
+    refine_abort_thresh = .5
     """threshold for giving up on the current image"""
 
     star_point_quantile = 0.99

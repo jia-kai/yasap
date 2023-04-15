@@ -47,4 +47,6 @@ airplane/satellite trails.
   always better than optical flow. Enable it by `--refiner star`.
 * In challenge settings (e.g., images with clouds and heavy light pollution),
   you can try `--skip-coarse-align --remove-bg --refiner star`.
+* Use `--only-stack --stacker softmax` for stacking star trail images with
+  aligned foreground.
 * Use `./remove_bg.py` to remove sky background.

@@ -1,23 +1,132 @@
+from .config import ConfigWithArgparse
+from .utils import logger, precise_quantile
+
 import numpy as np
 
-import typing
+from abc import ABCMeta, abstractmethod
 
-class StreamingStacker:
-    """stacking a stream of aligned images"""
+class StackerBase(metaclass=ABCMeta):
+    _is_first_img = True
+
+    def add_img(self, img: np.ndarray, mask: np.ndarray):
+        """add a new image to only the masked area; first mask is guaranteed to
+        be full frame"""
+        assert (img.dtype == np.float32 and mask.dtype == np.bool_ and
+                mask.shape == img.shape[:2] and
+                img.ndim == 3 and img.shape[2] == 3), (img.shape, mask.shape)
+        if self._is_first_img:
+            assert np.all(mask), 'first image must be all valid'
+        self._do_add_img(img, mask)
+        if self._is_first_img:
+            self._is_first_img = False
+
+    @abstractmethod
+    def _do_add_img(self, img, mask):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_preview_result(self) -> np.ndarray:
+        """get inaccurate result for fast preview"""
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_result(self) -> np.ndarray:
+        raise NotImplementedError()
+
+
+class SoftMaxStacker(StackerBase):
+    """stack by soft max, for star trails"""
+
+    class Config(ConfigWithArgparse):
+        n: int
+        """number of input images"""
+
+        temp_rank: float = 0.9999
+        """a parameter to control temperature, which is the balance between mean
+        and max value for SoftMaxStacker; this parameter defines a threshold as
+        the relative rank of values on the first input image, so that values
+        above this threshold are reduced by no more than ``temp_delta``"""
+
+        temp_delta: float = 0.05
+        """see  ``temp_rank``"""
+
+        def update_from_args(self, args):
+            super().update_from_args(args)
+            self.n = len(args.imgs)
+            return self
+
+    config: Config
+    temp: float
+
+    _cnt: np.ndarray
+    """number of images at each pixel location; ndim=2"""
+
+    _sum_img: np.ndarray
+
+    def __init__(self, config: "SoftMaxStacker.Config"):
+        self.config = config
+
+    def _do_add_img(self, img: np.ndarray, mask: np.ndarray):
+        if self._is_first_img:
+            # let k be the temp, M be the thresh
+            # assuming only one M and others are zeros
+            # softmax / M = 1 - (log n) / (kM)
+            thresh = precise_quantile(img, self.config.temp_rank)
+            assert thresh > 0
+            self.temp = np.log(self.config.n) / (thresh * self.config.temp_delta)
+            logger.info(f'SoftMaxStacker: {thresh=:.3f} temp={self.temp:.3f}')
+
+            self._cnt = np.ones_like(mask, dtype=np.float64)
+            self._sum_img = img.astype(np.float64).copy()
+            self._sum_img *= self.temp
+            return
+
+        mask3d = np.broadcast_to(np.expand_dims(mask, 2), img.shape)
+
+        self._cnt[mask] += 1
+
+        # (x, 1)
+        new_cnt_sel = np.expand_dims(self._cnt[mask], 1)
+        # (x, 3)
+        val_sel = self._sum_img[mask3d].reshape(new_cnt_sel.size, 3)
+        valu_sel = img[mask3d].reshape(new_cnt_sel.size, 3) * self.temp
+
+        ka = np.log1p((-1) / new_cnt_sel)
+        kb = np.log(new_cnt_sel)
+        new_val_sel = np.logaddexp(val_sel + ka, valu_sel - kb)
+        self._sum_img[mask3d] = new_val_sel.flatten()
+
+    def get_preview_result(self) -> np.ndarray:
+        return self.get_result()
+
+    def get_result(self) -> np.ndarray:
+        return (self._sum_img / self.temp).astype(np.float32)
+
+
+class MeanStacker(StackerBase):
+    """stack by mean value that allows removal of min/max outliers"""
+
+    class Config(ConfigWithArgparse):
+        rm_min: int = 0
+        """number of extreme min values to be removed for mean stacker"""
+
+        rm_max: int = 0
+        """number of extreme max values to be removed for mean stacker"""
+
 
     INF_VAL = 2.3
 
-    _mean_img: typing.Optional[np.ndarray] = None
+    _mean_img: np.ndarray
 
-    _min_list: typing.Optional[list[np.ndarray]] = None
+    _min_list: list[np.ndarray]
     """lowest N values"""
 
-    _max_list: typing.Optional[list[np.ndarray]] = None
+    _max_list: list[np.ndarray]
     """lowest N values of negative images"""
 
-    def __init__(self, rm_min: int, rm_max: int):
-        self.rm_min = rm_min
-        self.rm_max = rm_max
+    def __init__(self, config: "MeanStacker.Config"):
+        self.rm_min = config.rm_min
+        self.rm_max = config.rm_max
 
     def _update_min_list(self, dst: list[np.ndarray], img: np.ndarray):
         if not dst:
@@ -34,12 +143,8 @@ class StreamingStacker:
             dst[i] = new
             del new
 
-    def add_img(self, img: np.ndarray, mask: np.ndarray):
-        assert (img.dtype == np.float32 and mask.dtype == np.bool_ and
-                mask.shape == img.shape[:2] and
-                img.ndim == 3 and img.shape[2] == 3), (img.shape, mask.shape)
-        if self._mean_img is None:
-            assert np.all(mask), 'first image must be all valid'
+    def _do_add_img(self, img: np.ndarray, mask: np.ndarray):
+        if self._is_first_img:
             self._mean_img = img.copy()
             self._cnt_img = np.ones_like(img[:, :, 0], dtype=np.int16)
             fill = np.empty_like(self._mean_img)
@@ -124,7 +229,7 @@ class StreamingStacker:
 
         return self._mean_img - sub
 
-def run_random_test():
+def test_mean_stacker():
     import sys
     rng = np.random.RandomState(42)
 
@@ -143,7 +248,7 @@ def run_random_test():
             rng.shuffle(m[1:])  # first image has all mask on
             masks[:, i // img_w, i % img_w] = m
 
-        stack = StreamingStacker(rm_min, rm_max)
+        stack = MeanStacker(MeanStacker.Config(rm_min=rm_min, rm_max=rm_max))
         for i, j in zip(imgs, masks):
             stack.add_img(i, j)
         got = stack.get_result()
@@ -181,5 +286,44 @@ def run_random_test():
     run(20, 20, 10, 3, 5)
     run(21, 35, 25, 5, 3)
 
+def test_softmax_stacker():
+    from scipy.special import logsumexp
+    stacker = SoftMaxStacker(SoftMaxStacker.Config())
+    num = 5
+    h = 64
+    w = 64
+    rng = np.random.default_rng(1234)
+
+    imgs = rng.uniform(0, 1, size=(num, h, w, 3)).astype(np.float32)
+    masks = rng.uniform(0, 1, size=(num, h, w)) < 0.7
+    masks[0] = True
+
+    expect = np.empty((h, w, 3), dtype=np.float32)
+    for i in range(h):
+        for j in range(w):
+            inp = imgs[:, i, j][np.broadcast_to(
+                np.expand_dims(masks[:, i, j], 1),
+                (num, 3)
+            )]
+            inp = inp.reshape(-1, 3)
+            assert 1 <= inp.shape[0] <= num
+            expect[i, j] = (
+                logsumexp(inp * stacker.temp, axis=0) -
+                np.log(inp.shape[0])
+            ) / stacker.temp
+
+    for i in range(num):
+        stacker.add_img(imgs[i], masks[i])
+
+    np.testing.assert_allclose(stacker.get_result(), expect,
+                               rtol=1e-4, atol=1e-4)
+
+
+STACKER_DICT = {
+    'mean': MeanStacker,
+    'softmax': SoftMaxStacker,
+}
+
 if __name__ == '__main__':
-    run_random_test()
+    test_softmax_stacker()
+    test_mean_stacker()

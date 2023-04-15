@@ -4,8 +4,8 @@
 from libyasap.alignment import ImageStackAlignment, OpticalFlowRefiner
 from libyasap.star_point import StarPointRefiner
 from libyasap.config import AlignmentConfig
-from libyasap.stacker import StreamingStacker
-from libyasap.utils import setup_logger, logger, save_img, disp_img
+from libyasap.stacker import StackerBase, STACKER_DICT
+from libyasap.utils import read_img, setup_logger, logger, save_img, disp_img
 
 import numpy as np
 import cv2
@@ -38,7 +38,9 @@ def main():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument('imgs', nargs='+')
+    parser.add_argument('imgs', nargs='+',
+                        help='image files; use @fname to read filenames '
+                        'from a list')
     parser.add_argument('-o', '--output', required=True,
                         help='output file path that supports u16 (usually '
                         '.tif file); if .npy file is used, the original fp32 '
@@ -46,35 +48,55 @@ def main():
     parser.add_argument('--mask',
                         help='mask on all images for the ROI of star region: '
                         'white for star, black for others')
-    parser.add_argument('--rm-min', type=int, default=0,
-                        help='number of extreme min values (i.e., bottom n '
-                        'values) to be removed; require working memory '
-                        'proportional to this value')
-    parser.add_argument('--rm-max', type=int, default=0,
-                        help='number of extreme max values to be removed; see '
-                        'also --rm-min')
-    parser.add_argument('--refiner', default='opt', choices=REFINER_MAP.keys(),
+    parser.add_argument('--refiner', default='opt',
+                        choices=list(REFINER_MAP.keys()),
                         help='choose the refiner algorithm; `star` might be '
                         'better for deep sky imaging. See code for more info')
+    parser.add_argument('--stacker', default='mean',
+                        choices=list(STACKER_DICT.keys()),
+                        help='choose the stacker algorithm')
+    parser.add_argument('--only-stack', action='store_true',
+                        help='only do the stack part, assuming images have '
+                        'been aligned')
     parser.add_argument('-v', '--visualize', action='store_true',
                         help='visualize internal results')
     parser.add_argument('--log', help='also write log to file')
     AlignmentConfig.add_to_parser(parser)
+    for i in STACKER_DICT.values():
+        i.Config.add_to_parser(parser)
 
     args = parser.parse_args()
+
+    if len(args.imgs) == 1 and args.imgs[0].startswith('@'):
+        with open(args.imgs[0][1:]) as fin:
+            args.imgs = [i.strip() for i in fin]
+    else:
+        args.imgs = sorted(args.imgs)
 
     setup_logger(args.log)
     np.set_printoptions(suppress=True)
 
-    config = AlignmentConfig().update_from_args(args)
-
-    align = ImageStackAlignment(config, REFINER_MAP[args.refiner]())
+    align = ImageStackAlignment(AlignmentConfig().update_from_args(args),
+                                REFINER_MAP[args.refiner]())
     if args.mask:
         align.set_mask_from_file(args.mask)
-    stacker = StreamingStacker(args.rm_min, args.rm_max)
+    stacker_cls = STACKER_DICT[args.stacker]
+    stacker: StackerBase = stacker_cls(
+        stacker_cls.Config().update_from_args(args)
+    )
     discard_list = []
     for idx, path in enumerate(args.imgs):
         logger.info(f'working on {idx}/{len(args.imgs)}: {path}')
+        gc.collect()
+        if args.only_stack:
+            img = read_img(path)
+            stacker.add_img(img, np.ones_like(img[:, :, 0], dtype=bool))
+            if args.visualize:
+                disp_img('current', img, wait=False)
+                disp_img('result', stacker.get_preview_result(), wait=False)
+                cv2.waitKey(1)
+            continue
+
         aligned = align.feed_image_file(path)
         if aligned is None:
             discard_list.append(path)
@@ -82,7 +104,6 @@ def main():
             stacker.add_img(*aligned)
         if args.visualize:
             visualize(aligned, stacker.get_preview_result())
-        gc.collect()
     save_img(stacker.get_result(), args.output)
     logger.info(f'discarded images: {len(discard_list)} {discard_list}')
     err = align.error_stat()
