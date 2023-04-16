@@ -50,6 +50,10 @@ class SoftMaxStacker(StackerBase):
         temp_delta: float = 0.05
         """see  ``temp_rank``"""
 
+        def __init__(self, n: int, **kwargs):
+            super().__init__(**kwargs)
+            self.n = n
+
         def update_from_args(self, args):
             super().update_from_args(args)
             self.n = len(args.imgs)
@@ -288,15 +292,18 @@ def test_mean_stacker():
 
 def test_softmax_stacker():
     from scipy.special import logsumexp
-    stacker = SoftMaxStacker(SoftMaxStacker.Config())
     num = 5
     h = 64
     w = 64
     rng = np.random.default_rng(1234)
+    stacker = SoftMaxStacker(SoftMaxStacker.Config(n=num))
 
     imgs = rng.uniform(0, 1, size=(num, h, w, 3)).astype(np.float32)
     masks = rng.uniform(0, 1, size=(num, h, w)) < 0.7
     masks[0] = True
+
+    for i in range(num):
+        stacker.add_img(imgs[i], masks[i])
 
     expect = np.empty((h, w, 3), dtype=np.float32)
     for i in range(h):
@@ -311,9 +318,6 @@ def test_softmax_stacker():
                 logsumexp(inp * stacker.temp, axis=0) -
                 np.log(inp.shape[0])
             ) / stacker.temp
-
-    for i in range(num):
-        stacker.add_img(imgs[i], masks[i])
 
     np.testing.assert_allclose(stacker.get_result(), expect,
                                rtol=1e-4, atol=1e-4)
