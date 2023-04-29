@@ -6,6 +6,10 @@ import sys
 
 logger = logging.getLogger('yasap')
 
+g_use_rigid_for_homography = False
+"""if set to True, will use rigid transformation (rotation, scale, shift) for
+homography"""
+
 # see https://stackoverflow.com/questions/384076/how-can-i-color-python-logging-output
 class CustomFormatter(logging.Formatter):
     red = "\x1b[31m"
@@ -31,6 +35,11 @@ class CustomFormatter(logging.Formatter):
         log_fmt = self.FORMATS.get(record.levelno)
         formatter = logging.Formatter(log_fmt)
         return formatter.format(record)
+
+def set_use_rigid(flag: bool):
+    global g_use_rigid_for_homography
+    g_use_rigid_for_homography = bool(flag)
+    logger.info(f'use rigid transform global flag: {g_use_rigid_for_homography}')
 
 def setup_logger(file_path=None):
     logger.setLevel(logging.DEBUG)
@@ -86,7 +95,15 @@ def find_homography(src, dst, method):
     """:return: H, avg dist, max dist"""
     assert src.shape == dst.shape and src.shape[0] >= 4 and src.ndim == 2, (
         src.shape, dst.shape)
-    H, _ = cv2.findHomography(src, dst, method)
+    if g_use_rigid_for_homography:
+        if method == 0: # least square
+            method = cv2.LMEDS
+        assert method in (cv2.RANSAC, cv2.LMEDS)
+        m0, _ = cv2.estimateAffinePartial2D(src, dst, method=method)
+        assert m0.shape == (2, 3)
+        H = np.concatenate([m0, [[0, 0, 1]]], axis=0)
+    else:
+        H, _ = cv2.findHomography(src, dst, method)
     t = perspective_transform(H, src)
     return H, avg_l2_dist(t, dst), max_l2_dist(t, dst)
 
@@ -94,6 +111,9 @@ def disp_img(title: str, img: np.ndarray, wait=True, max_size: int=1000):
     """display an image while handling the keys"""
     if img.dtype == np.bool_:
         img = (img * 255).astype(np.uint8)
+
+    if img.dtype.kind == 'f':
+        img = (np.clip(img, 0, 1) * 255).astype(np.uint8)
 
     scale = max_size / max(img.shape)
     if scale < 1:

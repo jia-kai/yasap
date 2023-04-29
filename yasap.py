@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from libyasap.alignment import ImageStackAlignment, OpticalFlowRefiner
+from libyasap.alignment import ImageStackAlignment
+from libyasap.refiner import SparseOpticalFlowRefiner, DenseOpticalFlowRefiner
 from libyasap.star_point import StarPointRefiner
 from libyasap.config import AlignmentConfig
 from libyasap.stacker import StackerBase, STACKER_DICT
-from libyasap.utils import read_img, setup_logger, logger, save_img, disp_img
+from libyasap.utils import (read_img, setup_logger, logger, save_img, disp_img,
+                            set_use_rigid)
 
 import numpy as np
 import cv2
@@ -14,17 +16,20 @@ import argparse
 import gc
 
 REFINER_MAP = {
-    'opt': OpticalFlowRefiner,
+    'opts': SparseOpticalFlowRefiner,
+    'optd': DenseOpticalFlowRefiner,
     'star': StarPointRefiner,
 }
 
-def visualize(aligned, cur_result):
+def visualize(aligned, cur_result, **others):
     if aligned is None:
         aligned = (np.zeros_like(cur_result),
                    np.zeros_like(cur_result, dtype=bool))
     def imshow(x, title):
-        img = (np.clip(x, 0, 1) * 255).astype(np.uint8)
-        disp_img(title, img, wait=False, max_size=500)
+        disp_img(title, x, wait=False, max_size=500)
+
+    for k, v in others.items():
+        imshow(v, k)
 
     r, m = aligned
     r = r.copy()
@@ -48,7 +53,7 @@ def main():
     parser.add_argument('--mask',
                         help='mask on all images for the ROI of star region: '
                         'white for star, black for others')
-    parser.add_argument('--refiner', default='opt',
+    parser.add_argument('--refiner', default='opts',
                         choices=list(REFINER_MAP.keys()),
                         help='choose the refiner algorithm; `star` might be '
                         'better for deep sky imaging. See code for more info')
@@ -58,14 +63,20 @@ def main():
     parser.add_argument('--only-stack', action='store_true',
                         help='only do the stack part, assuming images have '
                         'been aligned')
-    parser.add_argument('-v', '--visualize', action='store_true',
-                        help='visualize internal results')
+    parser.add_argument('--use-rigid-transform', action='store_true',
+                        help='use 4-DOF rigid transform instead of 8-DOF '
+                        'homography')
     parser.add_argument('--log', help='also write log to file')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='visualize internal results')
     AlignmentConfig.add_to_parser(parser)
     for i in STACKER_DICT.values():
         i.Config.add_to_parser(parser)
 
     args = parser.parse_args()
+
+    if args.use_rigid_transform:
+        set_use_rigid(True)
 
     if len(args.imgs) == 1 and args.imgs[0].startswith('@'):
         with open(args.imgs[0][1:]) as fin:
@@ -91,7 +102,7 @@ def main():
         if args.only_stack:
             img = read_img(path)
             stacker.add_img(img, np.ones_like(img[:, :, 0], dtype=bool))
-            if args.visualize:
+            if args.verbose:
                 disp_img('current', img, wait=False)
                 disp_img('result', stacker.get_preview_result(), wait=False)
                 cv2.waitKey(1)
@@ -102,8 +113,9 @@ def main():
             discard_list.append(path)
         else:
             stacker.add_img(*aligned)
-        if args.visualize:
-            visualize(aligned, stacker.get_preview_result())
+        if args.verbose:
+            visualize(aligned, stacker.get_preview_result(),
+                      preproc=align.prev_preproc_img)
     save_img(stacker.get_result(), args.output)
     logger.info(f'discarded images: {len(discard_list)} {discard_list}')
     err = align.error_stat()

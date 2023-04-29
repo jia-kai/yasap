@@ -113,6 +113,27 @@ class AlignmentConfig(ConfigWithArgparse):
     remove_bg_thresh = 0.7
     """threshold of quantile for background removal"""
 
+    preproc_brightness = 0.0
+    """brightness change during preprocessing"""
+
+    preproc_contrast = 1.0
+    """contrast change during preprocessing"""
+
+    sparse_opt_quality_level = 0.3
+    """quality level for feature selection in sparse optical flow"""
+
+    sparse_opt_block_size = 7
+    """block size for feature selection in sparse optical flow"""
+
+    sparse_opt_levels = 1
+    """pyramid levels of tracking in sparse optical flow"""
+
+    sparse_opt_win_size = 12
+    """window size for optical flow in sparse optical flow"""
+
+    dense_opt_point_thresh = 0.99
+    """select the point whose brightness is above this quantile"""
+
     max_ftr_points = 2000
     """maximum number of feature points to be used for coarse matching"""
 

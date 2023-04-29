@@ -1,6 +1,7 @@
 from .utils import (logger, disp_img, precise_quantile, get_mask_for_largest,
                     perspective_transform, find_homography, disp_match_pairs,
                     in_bounding_box, format_relative_aa_bbox, avg_l2_dist)
+from .refiner import RefinerBase
 from .config import AlignmentConfig
 
 import pyximport
@@ -10,7 +11,7 @@ from .star_point_algo import find_star_centers, get_match_mask
 import cv2
 import numpy as np
 
-class StarPointRefiner:
+class StarPointRefiner(RefinerBase):
     """refine using a custom star point detector"""
     # the result seems to be very similar to OpticalFlowRefiner
 
