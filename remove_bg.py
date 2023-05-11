@@ -11,6 +11,10 @@ import argparse
 def work(img: np.ndarray, args) -> np.ndarray:
     img_orig = img.copy()
 
+    if args.brightness:
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        img = hsv[:, :, 2]
+
     min_rank = int(round(args.min_rank * img.shape[1]))
     row_min = np.expand_dims(
         np.partition(img, min_rank, axis=1)[:, min_rank],
@@ -25,6 +29,10 @@ def work(img: np.ndarray, args) -> np.ndarray:
     vmax = img.max()
     img -= vmin
     img *= 1 / (vmax - vmin)
+
+    if args.brightness:
+        hsv[:, :, 2] = img
+        img = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
     if args.mask:
         mask = read_img(args.mask)
@@ -42,9 +50,9 @@ def work(img: np.ndarray, args) -> np.ndarray:
         img = img * mask + img_orig * (1 - mask)
 
     if args.verbose:
+        disp_img('bg', np.broadcast_to(row_min, img.shape), wait=False)
         disp_img('input', img_orig, wait=False)
-        disp_img('output', img, wait=False)
-        disp_img('bg', np.broadcast_to(row_min, img.shape))
+        disp_img('output', img, wait=True)
 
     print(f'bg mean: {np.mean(row_min):.3g}')
     print(f'rescale: {vmin:.3g} {vmax: .3g}')
@@ -59,6 +67,9 @@ def main():
                         required=True)
     parser.add_argument('-o', '--output', help='output image',
                         required=True)
+    parser.add_argument(
+        '--brightness', action='store_true',
+        help='only remove the background on the brightness channel')
     parser.add_argument('--skip', action='store_true',
                         help='skip bg removal; useful as format converter')
     parser.add_argument('--gaussian-frac', default=0.02, type=float,

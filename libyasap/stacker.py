@@ -1,5 +1,5 @@
 from .config import ConfigWithArgparse
-from .utils import logger, precise_quantile
+from .utils import logger, precise_quantile, read_img
 
 import cv2
 import numpy as np
@@ -240,8 +240,12 @@ class CRgbCombineStacker(StackerBase):
     clear, R, G, B"""
 
     class Config(ConfigWithArgparse):
-        crgb_use_hls: int = 0
-        """whether to use HLS mode (L is scalar, H/S are first two PCs)"""
+        crgb_use_pca: int = 0
+        """whether to use PCA to compute H and S components"""
+
+        crgb_pca_mask: str = ''
+        """mask file for PCA computing"""
+
 
     _imgs: list[np.ndarray]
     _config: Config
@@ -259,40 +263,54 @@ class CRgbCombineStacker(StackerBase):
 
     def get_result(self) -> np.ndarray:
         assert len(self._imgs) == 4, f'4 images expected; got {len(self._imgs)}'
-        gray, r, g, b = self._imgs
-        bgr = np.concatenate([b, g, r], axis=2)
-
         def rescale(x: np.ndarray, maxv=1.0):
             x -= x.min()
             x *= maxv / x.max()
             return x
 
-        if self._config.crgb_use_hls:
+        gray, r, g, b = self._imgs
+        bgr = np.concatenate([b, g, r], axis=2)
+        V = rescale(np.clip(gray, 0, 1))
+
+        if self._config.crgb_use_pca:
             from sklearn.decomposition import PCA
-            L = rescale(np.clip(gray, 0, 1), maxv=.8)
 
             pca = PCA(n_components=2)
             h, w, _ = bgr.shape
             flat = bgr.reshape(h*w, 3)
-            pca.fit(flat)
+
+            if self._config.crgb_pca_mask:
+                mask = cv2.cvtColor(read_img(self._config.crgb_pca_mask),
+                                    cv2.COLOR_BGR2GRAY) > .5
+                pca.fit(flat[mask.reshape(h*w), :])
+                logger.info(f'PCA mask: {np.count_nonzero(mask)}')
+            else:
+                pca.fit(flat)
+            logger.info(f'PCA comp: {pca.components_}')
             H, S = pca.components_ @ flat.T
-            H = rescale(np.clip(H,
-                                precise_quantile(H, .0005),
-                                precise_quantile(H, .9995)), maxv=.9) + .05
-            S = rescale(S, maxv=.9) + .1
+            if self._config.crgb_pca_mask:
+                Hroi = H[mask.flatten()]
+                vmin = Hroi.min()
+                vmax = Hroi.max()
+                tmin = 0.05
+                tmax = 0.95
+                H = (H - vmin) / (vmax - vmin) * (tmax - tmin) + tmin
+                H = np.clip(H, 0, 1)
+            else:
+                H = rescale(H, maxv=.99)
+            S = rescale(S)
             logger.info('PCA explained variance:'
                         f' {pca.explained_variance_ratio_};'
                         f' H std: {np.std(H)}; S std: {np.std(S)} ')
             H = H.reshape((h, w, 1)) * 360
             S = S.reshape((h, w, 1))
-            hls = np.concatenate([H, L, S], axis=2)
-            bgr = cv2.cvtColor(hls, cv2.COLOR_HLS2BGR)
-            logger.info(f'bgr range: {bgr.min()} {bgr.max()}')
+            hsv = np.concatenate([H, S, V], axis=2)
         else:
-            scale = np.sqrt((gray**2).reshape(-1, 1).sum(axis=0) /
-                            (bgr**2).reshape(-1, 3).sum(axis=0))
-            logger.info(f'{scale=}')
-            bgr *= scale
+            hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+            hsv[:, :, 2] = np.squeeze(V, axis=2)
+
+        bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+        logger.info(f'bgr range: {bgr.min()} {bgr.max()}')
         bgr -= bgr.min()
         bgr /= bgr.max()
         return bgr
