@@ -174,9 +174,9 @@ def write_exr_f32(img: np.ndarray, fpath: str):
     f32_chan = Imath.Channel(Imath.PixelType(Imath.PixelType.FLOAT))
     header['channels'] = dict([(c, f32_chan) for c in 'RGB'])
     out = OpenEXR.OutputFile(fpath, header)
-    R = (img[:,:,0]).tobytes()
+    B = (img[:,:,0]).tobytes()
     G = (img[:,:,1]).tobytes()
-    B = (img[:,:,2]).tobytes()
+    R = (img[:,:,2]).tobytes()
     out.writePixels({'R' : R, 'G' : G, 'B' : B})
     out.close()
 
@@ -195,11 +195,24 @@ def save_img(img: np.ndarray, fpath: str):
     assert succ, f'failed to write image {fpath}'
 
 def read_img(fpath: str) -> np.ndarray:
-    """read an image as float32 format"""
+    """read an image as 3 channel float32 format"""
     if fpath.endswith('.npy'):
         img = np.load(fpath)
         assert img.ndim in [2, 3] and img.dtype == np.float32
         return img
+    if fpath.lower().endswith('.fit') or fpath.lower().endswith('.fits'):
+        from astropy.io import fits
+        with fits.open(fpath) as fin:
+            data = fin['PRIMARY'].data
+            if data.dtype == np.uint16:
+                data = data.astype(np.float32) / (2**16-1)
+            else:
+                raise RuntimeError(f'unhandled data type {data.dtype}')
+        if data.ndim == 2:
+            data = cv2.cvtColor(data, cv2.COLOR_GRAY2BGR)
+        assert data.ndim == 3, f'invalid shape: {data.shape}'
+        return data
+
     img = cv2.imread(fpath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
     assert img is not None, f'failed to read {fpath}'
     img = img.astype(np.float32) / np.float32(np.iinfo(img.dtype).max)

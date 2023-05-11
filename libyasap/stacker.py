@@ -1,6 +1,7 @@
 from .config import ConfigWithArgparse
 from .utils import logger, precise_quantile
 
+import cv2
 import numpy as np
 
 from abc import ABCMeta, abstractmethod
@@ -233,6 +234,70 @@ class MeanStacker(StackerBase):
 
         return self._mean_img - sub
 
+
+class CRgbCombineStacker(StackerBase):
+    """combine four filtered images into RGB; images given in the order gray
+    clear, R, G, B"""
+
+    class Config(ConfigWithArgparse):
+        crgb_use_hls: int = 0
+        """whether to use HLS mode (L is scalar, H/S are first two PCs)"""
+
+    _imgs: list[np.ndarray]
+    _config: Config
+
+    def __init__(self, config: "CRgbCombineStacker.Config"):
+        self._imgs = []
+        self._config = config
+
+    def _do_add_img(self, img: np.ndarray, mask):
+        self._imgs.append(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)[
+            :, :, np.newaxis])
+
+    def get_preview_result(self) -> np.ndarray:
+        return self._imgs[0]
+
+    def get_result(self) -> np.ndarray:
+        assert len(self._imgs) == 4, f'4 images expected; got {len(self._imgs)}'
+        gray, r, g, b = self._imgs
+        bgr = np.concatenate([b, g, r], axis=2)
+
+        def rescale(x: np.ndarray, maxv=1.0):
+            x -= x.min()
+            x *= maxv / x.max()
+            return x
+
+        if self._config.crgb_use_hls:
+            from sklearn.decomposition import PCA
+            L = rescale(np.clip(gray, 0, 1), maxv=.8)
+
+            pca = PCA(n_components=2)
+            h, w, _ = bgr.shape
+            flat = bgr.reshape(h*w, 3)
+            pca.fit(flat)
+            H, S = pca.components_ @ flat.T
+            H = rescale(np.clip(H,
+                                precise_quantile(H, .0005),
+                                precise_quantile(H, .9995)), maxv=.9) + .05
+            S = rescale(S, maxv=.9) + .1
+            logger.info('PCA explained variance:'
+                        f' {pca.explained_variance_ratio_};'
+                        f' H std: {np.std(H)}; S std: {np.std(S)} ')
+            H = H.reshape((h, w, 1)) * 360
+            S = S.reshape((h, w, 1))
+            hls = np.concatenate([H, L, S], axis=2)
+            bgr = cv2.cvtColor(hls, cv2.COLOR_HLS2BGR)
+            logger.info(f'bgr range: {bgr.min()} {bgr.max()}')
+        else:
+            scale = np.sqrt((gray**2).reshape(-1, 1).sum(axis=0) /
+                            (bgr**2).reshape(-1, 3).sum(axis=0))
+            logger.info(f'{scale=}')
+            bgr *= scale
+        bgr -= bgr.min()
+        bgr /= bgr.max()
+        return bgr
+
+
 def test_mean_stacker():
     import sys
     rng = np.random.RandomState(42)
@@ -326,6 +391,7 @@ def test_softmax_stacker():
 STACKER_DICT = {
     'mean': MeanStacker,
     'softmax': SoftMaxStacker,
+    'crgb': CRgbCombineStacker,
 }
 
 if __name__ == '__main__':
