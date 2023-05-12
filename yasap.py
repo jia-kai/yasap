@@ -66,6 +66,10 @@ def main():
     parser.add_argument('--use-rigid-transform', action='store_true',
                         help='use 4-DOF rigid transform instead of 8-DOF '
                         'homography')
+    parser.add_argument(
+        '--linear-rgb-match', action='store_true',
+        help='adjust contrast/brightness of RGB channels independently before '
+        'stacking; useful for filtering uniform clouds / different exposures')
     parser.add_argument('--log', help='also write log to file')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='visualize internal results')
@@ -95,6 +99,7 @@ def main():
     stacker: StackerBase = stacker_cls(
         stacker_cls.Config().update_from_args(args)
     )
+    stacker.set_linear_rgb_match(args.linear_rgb_match)
     discard_list = []
     for idx, path in enumerate(args.imgs):
         logger.info(f'working on {idx}/{len(args.imgs)}: {path}')

@@ -5,9 +5,16 @@ import cv2
 import numpy as np
 
 from abc import ABCMeta, abstractmethod
+import typing
 
 class StackerBase(metaclass=ABCMeta):
-    _is_first_img = True
+    _first_image: typing.Optional[np.ndarray] = None
+    _linear_rgb_match: bool = False
+
+    def set_linear_rgb_match(self, flag: bool):
+        """set whether to match mean color"""
+        self._linear_rgb_match = bool(flag)
+        return self
 
     def add_img(self, img: np.ndarray, mask: np.ndarray):
         """add a new image to only the masked area; first mask is guaranteed to
@@ -15,11 +22,29 @@ class StackerBase(metaclass=ABCMeta):
         assert (img.dtype == np.float32 and mask.dtype == np.bool_ and
                 mask.shape == img.shape[:2] and
                 img.ndim == 3 and img.shape[2] == 3), (img.shape, mask.shape)
-        if self._is_first_img:
+        if self._first_image is None:
             assert np.all(mask), 'first image must be all valid'
+        elif self._linear_rgb_match:
+            mfull = np.broadcast_to(mask[:, :, np.newaxis], img.shape)
+            def get_mean_std(img):
+                sub = img[mfull].reshape(-1, 3)
+                return np.mean(sub, axis=0), np.std(sub, axis=0)
+
+            first_mean, first_std = get_mean_std(self._first_image)
+            this_mean, this_std = get_mean_std(img)
+            img = img + (b := first_mean - this_mean)
+            img *= (k := first_std / np.maximum(this_std, 1e-6))
+            img = np.clip(img, 0, 1, out=img)
+            logger.info(f'Linear RGB match: {k=} {b=}')
+
         self._do_add_img(img, mask)
-        if self._is_first_img:
-            self._is_first_img = False
+
+        if self._first_image is None:
+            self._first_image = img
+
+    @property
+    def _is_first_img(self) -> bool:
+        return self._first_image is None
 
     @abstractmethod
     def _do_add_img(self, img, mask):

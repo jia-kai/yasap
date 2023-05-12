@@ -196,11 +196,12 @@ def save_img(img: np.ndarray, fpath: str):
 
 def read_img(fpath: str) -> np.ndarray:
     """read an image as 3 channel float32 format"""
-    if fpath.endswith('.npy'):
+    fpath_ext = fpath.lower()[fpath.rfind('.')+1:]
+    if fpath_ext == 'npy':
         img = np.load(fpath)
         assert img.ndim in [2, 3] and img.dtype == np.float32
         return img
-    if fpath.lower().endswith('.fit') or fpath.lower().endswith('.fits'):
+    if fpath_ext in ['fit', 'fits']:
         from astropy.io import fits
         with fits.open(fpath) as fin:
             data = fin['PRIMARY'].data
@@ -212,6 +213,21 @@ def read_img(fpath: str) -> np.ndarray:
             data = cv2.cvtColor(data, cv2.COLOR_GRAY2BGR)
         assert data.ndim == 3, f'invalid shape: {data.shape}'
         return data
+    if fpath_ext in ['nef']:
+        import rawpy
+        with rawpy.imread(fpath) as raw:
+            rgb = raw.postprocess(
+                # half_size=True,
+                demosaic_algorithm=rawpy.DemosaicAlgorithm.DHT,
+                median_filter_passes=1, user_wb=[1, 1, 1, 1],
+                output_color=rawpy.ColorSpace.Rec2020,
+                output_bps=16, user_flip=0,
+                no_auto_scale=True, no_auto_bright=True,
+            )
+        assert rgb.dtype == np.uint16
+        bgr = rgb[:, :, ::-1].astype(np.float32)
+        bgr /= 2**16-1
+        return bgr
 
     img = cv2.imread(fpath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
     assert img is not None, f'failed to read {fpath}'

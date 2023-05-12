@@ -11,9 +11,10 @@ import argparse
 def work(img: np.ndarray, args) -> np.ndarray:
     img_orig = img.copy()
 
+    img *= args.contrast
     if args.brightness:
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        img = hsv[:, :, 2]
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2Lab)
+        img = lab[:, :, 0]
 
     min_rank = int(round(args.min_rank * img.shape[1]))
     row_min = np.expand_dims(
@@ -24,15 +25,17 @@ def work(img: np.ndarray, args) -> np.ndarray:
     row_min = cv2.GaussianBlur(row_min, (1, ksize), 0)
 
     img -= row_min
+
+    if args.brightness:
+        lab[:, :, 0] = img
+        img = cv2.cvtColor(lab, cv2.COLOR_Lab2BGR)
+        row_min = row_min[:, :, np.newaxis] / 100   # for verbose
+
     img = np.clip(img, 0, 1, out=img)
     vmin = img.min()
     vmax = img.max()
     img -= vmin
     img *= 1 / (vmax - vmin)
-
-    if args.brightness:
-        hsv[:, :, 2] = img
-        img = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
 
     if args.mask:
         mask = read_img(args.mask)
@@ -72,6 +75,8 @@ def main():
         help='only remove the background on the brightness channel')
     parser.add_argument('--skip', action='store_true',
                         help='skip bg removal; useful as format converter')
+    parser.add_argument('--contrast', type=float, default=1.0,
+                        help='adjust input image contrast')
     parser.add_argument('--gaussian-frac', default=0.02, type=float,
                         help='Gaussian kernel size for row smoothing '
                         'relative to image height')
@@ -79,7 +84,7 @@ def main():
                         help='rank of minimal value to be selected')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='display internal results')
-    parser.add_argument('--roi', help='clip ROI: (x,y,w,h) in pixels')
+    parser.add_argument('--roi', help='clip ROI: (x,y,w,h) in pixels or ratio')
     parser.add_argument('--mask', help='use another image as a mask for '
                         'applying bg removal')
     args = parser.parse_args()
@@ -89,7 +94,13 @@ def main():
     print(f'image shape: {img.shape}')
 
     if args.roi:
-        x, y, w, h = map(int, args.roi.split(','))
+        x, y, w, h = map(float, args.roi.split(','))
+        if max(x, y, w, h) < 1:
+            H, W, _ = img.shape
+            x, y, w, h = [int(round(i * s))
+                          for i, s in zip([x, y, w, h], [W, H, W, H])]
+        else:
+            x, y, w, h = map(int, args.roi.split(','))
         img = img[y:y+h, x:x+w]
 
     if not args.skip:
