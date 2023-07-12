@@ -231,7 +231,10 @@ def read_img(fpath: str) -> np.ndarray:
 
     img = cv2.imread(fpath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
     assert img is not None, f'failed to read {fpath}'
-    img = img.astype(np.float32) / np.float32(np.iinfo(img.dtype).max)
+    if img.dtype != np.float32:
+        assert np.issubdtype(img.dtype, np.integer), (
+            f'unhandled dtype {img.dtype}')
+        img = img.astype(np.float32) / np.float32(np.iinfo(img.dtype).max)
     return img
 
 def format_relative_aa_bbox(pts: np.ndarray, img_shape: tuple[int]) -> str:

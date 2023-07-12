@@ -8,5 +8,5 @@ if [ -z "$dst" ]; then
     exit 1
 fi
 
-exec exiftool -TagsFromFile "$src" -overwrite_original \
-    "-all:all>all:all" "$dst"
+exiftool -TagsFromFile "$src" -overwrite_original "-all:all>all:all" "$dst"
+exiftool -Orientation= -overwrite_original "$dst"

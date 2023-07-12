@@ -20,9 +20,12 @@ def work(img: np.ndarray, args) -> np.ndarray:
     row_min = np.expand_dims(
         np.partition(img, min_rank, axis=1)[:, min_rank],
         1)
-    ksize = int(args.gaussian_frac * img.shape[0])
-    ksize += (ksize + 1) % 2
-    row_min = cv2.GaussianBlur(row_min, (1, ksize), 0)
+    if args.gaussian_frac < 0:
+        row_min[:] = np.mean(row_min, axis=0, keepdims=True)
+    else:
+        ksize = int(args.gaussian_frac * img.shape[0])
+        ksize += (ksize + 1) % 2
+        row_min = cv2.GaussianBlur(row_min, (1, ksize), 0)
 
     img -= row_min
 
@@ -79,7 +82,7 @@ def main():
                         help='adjust input image contrast')
     parser.add_argument('--gaussian-frac', default=0.02, type=float,
                         help='Gaussian kernel size for row smoothing '
-                        'relative to image height')
+                        'relative to image height; negative for global min')
     parser.add_argument('--min-rank', default=0.02, type=float,
                         help='rank of minimal value to be selected')
     parser.add_argument('-v', '--verbose', action='store_true',

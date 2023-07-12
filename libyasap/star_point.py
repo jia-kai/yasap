@@ -2,7 +2,8 @@ from .utils import (logger, disp_img, precise_quantile, get_mask_for_largest,
                     perspective_transform, find_homography, disp_match_pairs,
                     in_bounding_box, format_relative_aa_bbox, avg_l2_dist)
 from .refiner import RefinerBase
-from .config import AlignmentConfig
+
+import typing
 
 import pyximport
 pyximport.install()
@@ -11,14 +12,21 @@ from .star_point_algo import find_star_centers, get_match_mask
 import cv2
 import numpy as np
 
+if typing.TYPE_CHECKING:
+    from .alignment import ImageStackAlignment
+else:
+    ImageStackAlignment = 'ImageStackAlignment'
+
 class StarPointRefiner(RefinerBase):
     """refine using a custom star point detector"""
     # the result seems to be very similar to OpticalFlowRefiner
 
-    _parent = None
-    _first_img_gray_8u = None
-    _first_pt = None
-    _knn = None
+    _parent: ImageStackAlignment
+    _first_img_gray_8u: np.ndarray
+    _first_pt: np.ndarray   # star points on the first image
+    _first_quality: float
+
+    _knn: "cv2.ml.KNearest"
 
     def _draw_points(self, pt):
         img = np.zeros_like(self._first_img_gray_8u)
@@ -30,15 +38,17 @@ class StarPointRefiner(RefinerBase):
         img = cv2.dilate(img, ele)
         return img
 
-    def _get_star_coords(self, img_gray):
-        config: AlignmentConfig = self._parent._config
+    def _get_star_coords_and_score(self, img_gray) -> tuple[np.ndarray, float]:
+        """get coordinates of star points on this image, and a quality score of
+        this image"""
+        config = self._parent._config
         thresh = precise_quantile(img_gray, config.star_point_quantile)
         img_bin = img_gray >= thresh
         if (mask := self._parent._mask) is not None:
             assert mask.dtype == np.uint8
             img_bin *= (mask >= 1)
 
-        star_pt = find_star_centers(
+        star_pt, circleness_score = find_star_centers(
             img_gray * img_bin, config.star_point_min_area,
             config.star_point_min_bbox_ratio)
 
@@ -56,20 +66,30 @@ class StarPointRefiner(RefinerBase):
             disp_img('star_blob', img_bin, wait=False)
             disp_img('star_pt', self._draw_points(star_pt))
 
-        return star_pt
+        return star_pt, circleness_score
 
     def set_first_image(self, img_gray, img_gray_8u, parent):
         """:param parent: the owner ImageStackAlignment instance"""
         self._parent = parent
         self._first_img_gray_8u = img_gray_8u
-        self._first_pt = pt = self._get_star_coords(img_gray)
+        self._first_pt, self._first_quality = self._get_star_coords_and_score(
+            img_gray)
+        logger.info(f'Star point first image: num_pt={len(self._first_pt)}'
+                    f' quality={self._first_quality:.2f}')
         self._knn = cv2.ml.KNearest_create()
+        pt = self._first_pt.astype(np.float32)
         self._knn.train(pt, cv2.ml.ROW_SAMPLE,
                         np.arange(pt.shape[0], dtype=np.int32))
 
     def get_trans(self, H, img_gray):
-        config: AlignmentConfig = self._parent._config
-        src_pt = self._get_star_coords(img_gray)
+        config = self._parent._config
+        src_pt, quality_score = self._get_star_coords_and_score(img_gray)
+        if (quality_score <
+                self._first_quality - config.star_point_quality_thresh):
+            logger.warning(f'discard due to low quality: {quality_score:.2f}'
+                           f' (ref: {self._first_quality:.2f})')
+            return
+
         dst_pt = self._first_pt
 
         # iterative closest points
@@ -128,7 +148,8 @@ class StarPointRefiner(RefinerBase):
         logger.info(f'star point ICP: iter={iter_+1} '
                     f'selected={mask.sum()}({mask.sum()/len(src_pt)*100:.1f}%) '
                     f'bbox={format_relative_aa_bbox(H_dst, img_gray.shape)}\n'
-                    f'  err:{err_init:.3g}->{err:.3g},{err_max:.3g}'
+                    f'  err:{err_init:.3g}->{err:.3g},{err_max:.3g};'
+                    f' quality={quality_score:.2f}'
                     )
 
         return H, err

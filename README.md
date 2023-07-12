@@ -44,6 +44,10 @@ airplane/satellite trails.
   infinitely far pinpoint stars (unless you have a spherical sensor).
 * For deep sky targets, a rigid transform may be sufficient; in this case, use
   `--use-rigid-transform`.
+* For deep sky imaging with a long total exposure, consider using
+  `--linear-rgb-match` to compensate for the sky's brightness change. Also
+  consider using `--star-point-quality-thresh` to automatically remove images
+  with motion blur.
 * Sometimes using star point alignment (instead of optical flow) for refinement
   gives better results. This mode was added recently, and I am not sure if it is
   always better than optical flow. Enable it by `--refiner star`.

@@ -1,7 +1,6 @@
 from .config import AlignmentConfig
 from .refiner import RefinerBase
-from .utils import (perspective_transform, in_bounding_box, avg_l2_dist,
-                    find_homography, disp_img, logger, get_mask_for_largest,
+from .utils import (find_homography, disp_img, logger, get_mask_for_largest,
                     read_img)
 
 import cv2
