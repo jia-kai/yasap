@@ -49,13 +49,86 @@ class ImageStackAlignment:
         mask[img >= 127] = 255
         self._mask = mask
 
+    def _apply_lens_correction(self, fpath: str, img: np.ndarray) -> np.ndarray:
+        import lensfunpy
+        import exifread
+        with open(fpath, 'rb') as fin:
+            tags = exifread.process_file(fin)
+        cam_maker = str(tags['Image Make'])
+        cam_model = str(tags['Image Model'])
+        lens_maker = str(tags['EXIF LensMake'])
+        lens_model = str(tags['EXIF LensModel'])
+
+        db = lensfunpy.Database()
+        cam = db.find_cameras(cam_maker, cam_model)
+        assert cam, f'camera {cam_maker} {cam_model} not found'
+        cam = cam[0]
+        lens = db.find_lenses(cam, lens_maker, lens_model)
+        assert lens, f'lens {lens_maker} {lens_model} not found'
+
+        lens = lens[0]
+
+        focal_length = (float(tags['EXIF FocalLength'].values[0].num) /
+                        float(tags['EXIF FocalLength'].values[0].den))
+        aperture = (float(tags['EXIF FNumber'].values[0].num) /
+                    float(tags['EXIF FNumber'].values[0].den))
+        mod = lensfunpy.Modifier(lens, cam.crop_factor, img.shape[1],
+                                 img.shape[0])
+        mod.initialize(
+            focal_length, aperture, self._config.lens_correction_dist,
+            pixel_format=np.float32)
+
+        #cv2.imwrite('/tmp/img-0.jpg', (img * 255).astype(np.uint8))
+
+        vignetting = mod.apply_color_modification(img)
+
+        #cv2.imwrite('/tmp/img-1.jpg', (img * 255).astype(np.uint8))
+
+        if ((coordmap := mod.apply_subpixel_geometry_distortion())
+                is not None):
+            geo_type = 2
+            undist = np.empty_like(img)
+            for i in range(3):
+                undist[:, :, i] = cv2.remap(
+                    img[:, :, i], coordmap[:, :, i], None,
+                    interpolation=cv2.INTER_LANCZOS4,
+                    borderMode=cv2.BORDER_REFLECT
+                )
+        else:
+            coordmap = mod.apply_geometry_distortion()
+            if coordmap is None:
+                geo_type = 0
+                undist = img
+            else:
+                geo_type = 1
+                undist = cv2.remap(img, coordmap, None,
+                                   interpolation=cv2.INTER_LANCZOS4,
+                                   borderMode=cv2.BORDER_REFLECT)
+        #cv2.imwrite('/tmp/img-2.jpg', (undist * 255).astype(np.uint8))
+        if not vignetting:
+            logger.warning('vignetting correction failed')
+        if geo_type != 2:
+            logger.warning('geometry correction type is {geo_type}')
+        logger.info('Lens correction:\n'
+                    f' Camera: {cam}\n'
+                    f' Lens: {lens}\n'
+                    f' len={focal_length:.1f}; F/{aperture:.1f}')
+        return undist
+
+    def read_img(self, fpath: str) -> np.ndarray:
+        """read an image with basic corrections applied"""
+        logger.info(f'loading {fpath}')
+        img = read_img(fpath)
+        if self._config.apply_lens_correction:
+            img = self._apply_lens_correction(fpath, img)
+        return img
+
     def feed_image_file(self, fpath: str):
         """feed an image to be aligned
         :return: (the aligned image, mask of valid values) or None if error too
             large
         """
-        logger.info(f'processing {fpath}')
-        img = read_img(fpath)
+        img = self.read_img(fpath)
         h, w, _ = img.shape
         if self._out_shape is None:
             self._out_shape = (w, h)

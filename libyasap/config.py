@@ -85,6 +85,12 @@ class ConfigWithArgparse:
 class AlignmentConfig(ConfigWithArgparse):
     """default configuration options"""
 
+    apply_lens_correction = False
+    """whether to apply lens correction on the input images"""
+
+    lens_correction_dist = 1e5
+    """assumed object distance for lens correction"""
+
     ftr_match_coord_dist = 0.01
     """maximal distance of coordinates between matched feature points, relative
     to image width"""

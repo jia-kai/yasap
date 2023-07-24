@@ -105,7 +105,7 @@ def main():
         logger.info(f'working on {idx}/{len(args.imgs)}: {path}')
         gc.collect()
         if args.only_stack:
-            img = read_img(path)
+            img = align.read_img(path)
             stacker.add_img(img, np.ones_like(img[:, :, 0], dtype=bool))
             if args.verbose:
                 disp_img('current', img, wait=False)
