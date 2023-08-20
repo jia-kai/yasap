@@ -8,15 +8,29 @@ from abc import ABCMeta, abstractmethod
 import typing
 
 class StackerBase(metaclass=ABCMeta):
+    class Config(ConfigWithArgparse):
+        linear_rgb_match: bool = False
+        """adjust contrast/brightness of RGB channels independently before
+        stacking; useful for filtering uniform clouds / different exposures"""
+
+        linear_rgb_match_dist_thresh: float = 0.005
+        """distance threshold for linear RGB matching; images would be discarded
+        if L2 distance of quantiles is larger than this"""
+
     _first_image: typing.Optional[np.ndarray] = None
-    _linear_rgb_match: bool = False
 
-    def set_linear_rgb_match(self, flag: bool):
+    _linear_match_check_quants = np.concatenate([
+        np.linspace(0, 0.9, 50),
+        np.linspace(0.9, 1, 50),
+    ])
+
+    _config: Config
+
+    def set_config(self, config: Config):
         """set whether to match mean color"""
-        self._linear_rgb_match = bool(flag)
-        return self
+        self._config = config
 
-    def add_img(self, img: np.ndarray, mask: np.ndarray):
+    def add_img(self, img: np.ndarray, mask: np.ndarray) -> bool:
         """add a new image to only the masked area; first mask is guaranteed to
         be full frame"""
         assert (img.dtype == np.float32 and mask.dtype == np.bool_ and
@@ -24,23 +38,38 @@ class StackerBase(metaclass=ABCMeta):
                 img.ndim == 3 and img.shape[2] == 3), (img.shape, mask.shape)
         if self._first_image is None:
             assert np.all(mask), 'first image must be all valid'
-        elif self._linear_rgb_match:
+        elif self._config.linear_rgb_match:
             mfull = np.broadcast_to(mask[:, :, np.newaxis], img.shape)
             def get_mean_std(img):
-                sub = img[mfull].reshape(-1, 3)
-                return np.mean(sub, axis=0), np.std(sub, axis=0)
+                sub = np.ascontiguousarray(img[mfull].reshape(-1, 3).T)
+                qs = np.quantile(sub, self._linear_match_check_quants, axis=1)
+                return np.mean(sub, axis=1), np.std(sub, axis=1), qs
 
-            first_mean, first_std = get_mean_std(self._first_image)
-            this_mean, this_std = get_mean_std(img)
-            img = img + (b := first_mean - this_mean)
-            img *= (k := first_std / np.maximum(this_std, 1e-6))
+            first_mean, first_std, first_q = get_mean_std(self._first_image)
+            this_mean, this_std, this_q = get_mean_std(img)
+            b = first_mean - this_mean
+            k = first_std / np.maximum(this_std, 1e-6)
+            cmp_q = (this_q + b)
+            cmp_q *= k
+
+            dist = float(np.sqrt(np.square((cmp_q - first_q).flatten()).mean()))
+            if dist > (thresh := self._config.linear_rgb_match_dist_thresh):
+                logger.warning(f'discard due to large dist after linear '
+                               f'RGB match: {dist=:.3g} {thresh=:.3g}')
+                return False
+
+            img = img + b
+            img *= k
             img = np.clip(img, 0, 1, out=img)
-            logger.info(f'Linear RGB match: {k=} {b=}')
+            ks = ', '.join(map('{:.3f}'.format, k))
+            bs = ', '.join(map('{:.3f}'.format, b))
+            logger.info(f'Linear RGB match: k=[{ks}] b=[{bs}] {dist=:.3g}')
 
         self._do_add_img(img, mask)
 
         if self._first_image is None:
             self._first_image = img
+        return True
 
     @property
     def _is_first_img(self) -> bool:

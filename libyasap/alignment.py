@@ -208,7 +208,10 @@ class ImageStackAlignment:
             self._prev_ftr = ftr
 
         self._prev_trans = H
-        newimg = cv2.warpPerspective(img, H, self._out_shape)
+        # use nearest neighbor interpolation to avoid blurring; there should not
+        # be too much artifacts because we will average multiple images
+        newimg = cv2.warpPerspective(img, H, self._out_shape,
+                                     flags=cv2.INTER_NEAREST)
         mask = np.empty(img.shape[:2], dtype=np.uint8)
         mask[:] = 255
         mask = cv2.warpPerspective(mask, H, self._out_shape)

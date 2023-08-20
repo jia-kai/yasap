@@ -6,8 +6,9 @@ from libyasap.refiner import SparseOpticalFlowRefiner, DenseOpticalFlowRefiner
 from libyasap.star_point import StarPointRefiner
 from libyasap.config import AlignmentConfig
 from libyasap.stacker import StackerBase, STACKER_DICT
-from libyasap.utils import (read_img, setup_logger, logger, save_img, disp_img,
+from libyasap.utils import (setup_logger, logger, save_img, disp_img,
                             set_use_rigid)
+from libyasap.postprocess import run_postprocess
 
 import numpy as np
 import cv2
@@ -46,6 +47,9 @@ def main():
     parser.add_argument('imgs', nargs='+',
                         help='image files; use @fname to read filenames '
                         'from a list')
+    parser.add_argument('--postprocess',
+                        help='run a postprocess script; requires one input and '
+                        'one output; the script one main(img)->img function')
     parser.add_argument('-o', '--output', required=True,
                         help='output file path that supports u16 (usually '
                         '.tif file); if .npy file is used, the original fp32 '
@@ -66,18 +70,20 @@ def main():
     parser.add_argument('--use-rigid-transform', action='store_true',
                         help='use 4-DOF rigid transform instead of 8-DOF '
                         'homography')
-    parser.add_argument(
-        '--linear-rgb-match', action='store_true',
-        help='adjust contrast/brightness of RGB channels independently before '
-        'stacking; useful for filtering uniform clouds / different exposures')
     parser.add_argument('--log', help='also write log to file')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='visualize internal results')
     AlignmentConfig.add_to_parser(parser)
+    StackerBase.Config.add_to_parser(parser)
     for i in STACKER_DICT.values():
         i.Config.add_to_parser(parser)
 
     args = parser.parse_args()
+    setup_logger(args.log)
+
+    if args.postprocess:
+        assert len(args.imgs) == 1, 'only one input can be provided'
+        return run_postprocess(args.postprocess, args.imgs[0], args.output)
 
     if args.use_rigid_transform:
         set_use_rigid(True)
@@ -88,9 +94,6 @@ def main():
     else:
         args.imgs = sorted(args.imgs)
 
-    setup_logger(args.log)
-    np.set_printoptions(suppress=True)
-
     align = ImageStackAlignment(AlignmentConfig().update_from_args(args),
                                 REFINER_MAP[args.refiner]())
     if args.mask:
@@ -99,10 +102,11 @@ def main():
     stacker: StackerBase = stacker_cls(
         stacker_cls.Config().update_from_args(args)
     )
-    stacker.set_linear_rgb_match(args.linear_rgb_match)
+    stacker.set_config(StackerBase.Config().update_from_args(args))
     discard_list = []
     for idx, path in enumerate(args.imgs):
-        logger.info(f'working on {idx}/{len(args.imgs)}: {path}')
+        logger.info('working on '
+                    f'{idx}({idx-len(discard_list)})/{len(args.imgs)}: {path}')
         gc.collect()
         if args.only_stack:
             img = align.read_img(path)
@@ -117,7 +121,8 @@ def main():
         if aligned is None:
             discard_list.append(path)
         else:
-            stacker.add_img(*aligned)
+            if not stacker.add_img(*aligned):
+                discard_list.append(path)
         if args.verbose:
             visualize(aligned, stacker.get_preview_result(),
                       preproc=align.prev_preproc_img)
