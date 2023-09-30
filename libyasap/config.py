@@ -125,6 +125,9 @@ class AlignmentConfig(ConfigWithArgparse):
     preproc_contrast = 1.0
     """contrast change during preprocessing"""
 
+    preproc_show = False
+    """whether to show preprocessed image"""
+
     sparse_opt_quality_level = 0.3
     """quality level for feature selection in sparse optical flow"""
 

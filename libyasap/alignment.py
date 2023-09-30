@@ -140,14 +140,14 @@ class ImageStackAlignment:
         """preprocess an input gray image"""
         src *= self._config.preproc_contrast
         src += self._config.preproc_brightness
-        if not self._config.remove_bg:
-            return src
-        flat = src
-        if self._mask is not None:
-            flat = flat[self._mask > 127]
-        thresh = np.quantile(flat.flatten(), self._config.remove_bg_thresh)
-        src = np.maximum(src - thresh, 0)
-        src /= src.max()
+        if self._config.remove_bg:
+            flat = src
+            if self._mask is not None:
+                flat = flat[self._mask > 127]
+            thresh = np.quantile(flat.flatten(), self._config.remove_bg_thresh)
+            src = np.maximum(src - thresh, 0)
+            src /= src.max()
+        src = np.clip(src, 0, 1, out=src)
         return src
 
     def _handle_image(self, img):
@@ -156,6 +156,8 @@ class ImageStackAlignment:
         img_gray = self._img_preproc(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
         self.prev_preproc_img = img_gray
         img_gray_8u = (img_gray * 255).astype(np.uint8)
+        if self._config.preproc_show:
+            disp_img('preproc', img_gray_8u)
         if not self._config.skip_coarse_align:
             prev_ftr = self._prev_ftr
             ftr = self._get_ftr_points(img_gray_8u)
