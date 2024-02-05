@@ -85,7 +85,7 @@ class StarPointRefiner(RefinerBase):
         config = self._parent._config
         src_pt, quality_score = self._get_star_coords_and_score(img_gray)
         if (quality_score <
-                self._first_quality - config.star_point_quality_thresh):
+                self._first_quality - config.star_point_quality_max_drop):
             logger.warning(f'discard due to low quality: {quality_score:.2f}'
                            f' (ref: {self._first_quality:.2f})')
             return

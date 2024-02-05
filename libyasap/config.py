@@ -178,6 +178,6 @@ class AlignmentConfig(ConfigWithArgparse):
     star_point_icp_stop_err = 0.15
     """average pixel error for the ICP to stop"""
 
-    star_point_quality_thresh = float('inf')
+    star_point_quality_max_drop = float('inf')
     """abandon the current image if the quality of star points compared to the
     first image is below this threshold"""

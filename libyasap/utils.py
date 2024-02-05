@@ -109,6 +109,7 @@ def find_homography(src, dst, method):
 
 def disp_img(title: str, img: np.ndarray, wait=True, max_size: int=1000):
     """display an image while handling the keys"""
+    print(f'display {title}: shape={img.shape}, dtype={img.dtype}')
     if img.dtype == np.bool_:
         img = (img * 255).astype(np.uint8)
 

@@ -6,7 +6,7 @@ def make_ext(modname, pyxfilename):
     return Extension(
         name=modname,
         sources=[pyxfilename],
-        extra_compile_args=['-O3', '-march=native'],
+        extra_compile_args=['-O3', '-march=native', '-ggdb'],
         include_dirs=[np.get_include()],
     )
 
