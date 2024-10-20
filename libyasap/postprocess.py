@@ -31,7 +31,10 @@ def auto_white_balance(img: npt.NDArray[np.float32], *,
         chl_mask &= chl > max(np.quantile(chl[sel_mask], quantile),
                               chl_max[i] - max_drop)
     sel_mask &= chl_mask
-    logger.info(f'num selected pixels: {np.count_nonzero(sel_mask)}')
+    nr_sel = np.count_nonzero(sel_mask)
+    logger.info(f'num selected pixels: {nr_sel}')
+    if not nr_sel:
+        raise ValueError('no pixel selected')
     sub = img[np.broadcast_to(sel_mask[:, :, np.newaxis], img.shape)].reshape(
         (-1, 3)
     )
@@ -188,3 +191,26 @@ def run_postprocess(script_path, input_path, output_path):
     out = module.main(img).astype(np.float32)
     assert out.ndim == 3 and out.shape[2] == 3
     save_img(out, output_path)
+
+def blend_with_mask(img: npt.NDArray[np.float32],
+                    other_img_path: str, mask_path: str,
+                    *, sigma=30, verbose: bool=False) -> npt.NDArray[np.float32]:
+    """blend an image with a mask
+    :param img: the image to be blended
+    :param other_img_path: the other image to be blended
+    :param mask_path: the mask image; 0 for first image, 1 for second image
+    :param sigma: sigma for Gaussian blur of the mask
+    """
+    other_img = np.load(other_img_path)
+    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+    mask = (mask > 127).astype(np.float32)
+    mask = cv2.GaussianBlur(mask, (0, 0), sigma)
+    mask /= mask.max()
+    mask = np.expand_dims(mask, 2)
+    out = img * (1 - mask) + other_img * mask
+    if verbose:
+        disp_img('input', img, wait=False)
+        disp_img('other', other_img, wait=False)
+        disp_img('mask', mask, wait=False)
+        disp_img('output', out)
+    return out

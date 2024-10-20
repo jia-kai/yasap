@@ -5,6 +5,8 @@ from .utils import (find_homography, disp_img, logger, get_mask_for_largest,
 
 import cv2
 import numpy as np
+import numpy.typing as npt
+import typing
 
 class ImageStackAlignment:
     _config: AlignmentConfig
@@ -23,8 +25,8 @@ class ImageStackAlignment:
 
     _prev_ftr: tuple = None
 
-    _mask: np.ndarray = None
-    """ROI mask in [0, 255]"""
+    _mask: npt.NDArray[np.uint8] = None
+    """ROI mask in ``{0, 255}``"""
 
     _is_first = True
     _first_img_gray_8u: np.ndarray
@@ -48,6 +50,12 @@ class ImageStackAlignment:
         mask = np.zeros_like(img)
         mask[img >= 127] = 255
         self._mask = mask
+
+    def get_roi_mask(self) -> typing.Optional[npt.NDArray[np.bool_]]:
+        """get the ROI mask"""
+        if self._mask is None:
+            return None
+        return self._mask > 127
 
     def _apply_lens_correction(self, fpath: str, img: np.ndarray) -> np.ndarray:
         import lensfunpy

@@ -3,6 +3,7 @@ from .utils import logger, precise_quantile, read_img
 
 import cv2
 import numpy as np
+import numpy.typing as npt
 
 from abc import ABCMeta, abstractmethod
 import typing
@@ -19,57 +20,83 @@ class StackerBase(metaclass=ABCMeta):
 
     _first_image: typing.Optional[np.ndarray] = None
 
-    _linear_match_check_quants = np.concatenate([
-        np.linspace(0, 0.9, 50),
-        np.linspace(0.9, 1, 50),
-    ])
-
     _config: Config
 
     def set_config(self, config: Config):
         """set whether to match mean color"""
         self._config = config
 
-    def add_img(self, img: np.ndarray, mask: np.ndarray) -> bool:
+    def add_img(self, img: np.ndarray, mask: np.ndarray,
+                roi_mask: typing.Optional[npt.NDArray[np.bool_]]=None) -> bool:
         """add a new image to only the masked area; first mask is guaranteed to
-        be full frame"""
+        be full frame
+        :param roi_mask: region of interest mask, used for linear RGB match
+        """
         assert (img.dtype == np.float32 and mask.dtype == np.bool_ and
                 mask.shape == img.shape[:2] and
                 img.ndim == 3 and img.shape[2] == 3), (img.shape, mask.shape)
         if self._first_image is None:
             assert np.all(mask), 'first image must be all valid'
         elif self._config.linear_rgb_match:
-            mfull = np.broadcast_to(mask[:, :, np.newaxis], img.shape)
-            def get_mean_std(img):
-                sub = np.ascontiguousarray(img[mfull].reshape(-1, 3).T)
-                qs = np.quantile(sub, self._linear_match_check_quants, axis=1)
-                return np.mean(sub, axis=1), np.std(sub, axis=1), qs
-
-            first_mean, first_std, first_q = get_mean_std(self._first_image)
-            this_mean, this_std, this_q = get_mean_std(img)
-            b = first_mean - this_mean
-            k = first_std / np.maximum(this_std, 1e-6)
-            cmp_q = (this_q + b)
-            cmp_q *= k
-
-            dist = float(np.sqrt(np.square((cmp_q - first_q).flatten()).mean()))
-            if dist > (thresh := self._config.linear_rgb_match_dist_thresh):
-                logger.warning(f'discard due to large dist after linear '
-                               f'RGB match: {dist=:.3g} {thresh=:.3g}')
+            img_m = self._do_linear_rgb_match(img, mask, roi_mask)
+            if img_m is None:
                 return False
-
-            img = img + b
-            img *= k
-            img = np.clip(img, 0, 1, out=img)
-            ks = ', '.join(map('{:.3f}'.format, k))
-            bs = ', '.join(map('{:.3f}'.format, b))
-            logger.info(f'Linear RGB match: k=[{ks}] b=[{bs}] {dist=:.3g}')
+            img = img_m
 
         self._do_add_img(img, mask)
 
         if self._first_image is None:
             self._first_image = img
         return True
+
+    _linear_match_fit_quants = np.concatenate([
+        np.linspace(0.1, 0.8, 50),
+        np.linspace(0.8, 0.99, 50),
+    ])
+    _linear_match_first_quants = None
+    def _do_linear_rgb_match(
+            self, img: npt.NDArray[np.float32], mask: npt.NDArray[np.bool_],
+            roi_mask: typing.Optional[npt.NDArray[np.bool_]]
+    ) -> typing.Optional[npt.NDArray[np.float32]]:
+        """adjust contrast/brightness of RGB channels independently
+        to match the first image"""
+        mfull = mask
+        if roi_mask is not None:
+            mfull = mfull & roi_mask
+        mfull = np.broadcast_to(mfull[:, :, np.newaxis], img.shape)
+        def get_quants(img):
+            """get quantiles for each channel in shape (3, N)"""
+            sub = np.ascontiguousarray(img[mfull].reshape(-1, 3).T)
+            qs = np.quantile(sub, self._linear_match_fit_quants, axis=1)
+            return np.ascontiguousarray(qs.T)
+
+        this_q = get_quants(img)
+        if self._linear_match_first_quants is None:
+            self._linear_match_first_quants = this_q
+            return img
+
+        first_q = self._linear_match_first_quants
+        rgb_k = np.empty(3, dtype=np.float32)
+        rgb_b = np.empty(3, dtype=np.float32)
+        for i in range(3):
+            xi = this_q[i]
+            xi = np.vstack([xi, np.ones_like(xi)]).T
+            rgb_k[i], rgb_b[i] = np.linalg.lstsq(xi, first_q[i], rcond=None)[0]
+
+        cmp_q = this_q * rgb_k[:, np.newaxis] + rgb_b[:, np.newaxis]
+        dist = float(np.sqrt(np.square((cmp_q - first_q).flatten()).mean()))
+        if dist > (thresh := self._config.linear_rgb_match_dist_thresh):
+            logger.warning(f'discard due to large dist after linear '
+                           f'RGB match: {dist=:.3g} {thresh=:.3g}')
+            return
+
+        img = img * rgb_k
+        img += rgb_b
+        img = np.clip(img, 0, 1, out=img)
+        ks = ', '.join(map('{:.3f}'.format, rgb_k))
+        bs = ', '.join(map('{:.3f}'.format, rgb_b))
+        logger.info(f'Linear RGB match: k=[{ks}] b=[{bs}] {dist=:.3g}')
+        return img
 
     @property
     def _is_first_img(self) -> bool:

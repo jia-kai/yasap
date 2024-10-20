@@ -118,10 +118,11 @@ def main():
             continue
 
         aligned = align.feed_image_file(path)
+        roi_mask = align.get_roi_mask()
         if aligned is None:
             discard_list.append(path)
         else:
-            if not stacker.add_img(*aligned):
+            if not stacker.add_img(*aligned, roi_mask=roi_mask):
                 discard_list.append(path)
         if args.verbose:
             visualize(aligned, stacker.get_preview_result(),

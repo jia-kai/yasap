@@ -181,6 +181,12 @@ def write_exr_f32(img: np.ndarray, fpath: str):
     out.writePixels({'R' : R, 'G' : G, 'B' : B})
     out.close()
 
+def write_tiff_f32(img: np.ndarray, fpath: str):
+    import tifffile
+    assert img.ndim == 3 and img.shape[2] == 3 and img.dtype == np.float32
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    tifffile.imwrite(fpath, img, photometric='rgb')
+
 def save_img(img: np.ndarray, fpath: str):
     """save image to file"""
     assert img.dtype == np.float32
@@ -189,6 +195,9 @@ def save_img(img: np.ndarray, fpath: str):
         return
     if fpath.endswith('.exr'):
         write_exr_f32(img, fpath)
+        return
+    if fpath.endswith('.tiff'):
+        write_tiff_f32(img, fpath)
         return
 
     img = (np.clip(img, 0, 1) * 65535).astype(np.uint16)
@@ -219,15 +228,18 @@ def read_img(fpath: str) -> np.ndarray:
         with rawpy.imread(fpath) as raw:
             rgb = raw.postprocess(
                 # half_size=True,
-                demosaic_algorithm=rawpy.DemosaicAlgorithm.DHT,
-                median_filter_passes=1, user_wb=[1, 1, 1, 1],
+                # use linear since noise/artifacts are dealt with by stacking
+                demosaic_algorithm=rawpy.DemosaicAlgorithm.LINEAR,
+                median_filter_passes=0, user_wb=[1, 1, 1, 1],
                 output_color=rawpy.ColorSpace.Rec2020,
                 output_bps=16, user_flip=0,
                 no_auto_scale=True, no_auto_bright=True,
             )
+            white_level = raw.white_level
         assert rgb.dtype == np.uint16
         bgr = rgb[:, :, ::-1].astype(np.float32)
-        bgr /= 2**16-1
+        bgr /= white_level
+        bgr = np.clip(bgr, 0, 1, out=bgr)
         return bgr
 
     img = cv2.imread(fpath, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
