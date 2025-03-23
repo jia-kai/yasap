@@ -1,18 +1,20 @@
-from .utils import read_img, disp_img, logger, save_img
+from .utils import read_img, disp_img, logger, save_img, F32Arr, U8Arr
 
 import cv2
 import numpy as np
 import numpy.typing as npt
+import typing
 
 import importlib.util
 import sys
 
-def auto_white_balance(img: npt.NDArray[np.float32], *,
+def auto_white_balance(img: F32Arr, *,
                        saturation_thresh=0.98,
                        quantile=0.05,
                        max_drop=0.03,
-                       verbose: bool=False
-                       ) -> npt.NDArray[np.float32]:
+                       verbose: bool=False,
+                       mask: typing.Optional[U8Arr] = None,
+                       ) -> F32Arr:
     """set automatic balance for astro images by assuming stars are white
 
     :param saturation_thresh: only work with pixels whose all channels are below
@@ -21,15 +23,21 @@ def auto_white_balance(img: npt.NDArray[np.float32], *,
     :param max_drop: max drop of chnannel values for selected pixels
     """
 
-    chl_max = img.reshape((-1, 3)).max(axis=0)
+    masked_img = cv2.GaussianBlur(img, (5, 5), 0)
+    if mask is not None:
+        masked_img = np.where(mask[:, :, np.newaxis] > 127, masked_img, 0)
+
+    chl_max = masked_img.reshape((-1, 3)).max(axis=0)
     logger.info(f'channel max: {chl_max}')
     sel_mask = np.zeros(img.shape[:2], dtype=bool)
     sel_mask[img.max(axis=2) < saturation_thresh] = True
     chl_mask = np.ones_like(sel_mask)
     for i in range(3):
-        chl = img[:, :, i]
-        chl_mask &= chl > max(np.quantile(chl[sel_mask], quantile),
-                              chl_max[i] - max_drop)
+        chl = masked_img[:, :, i]
+        chl_th = max(float(np.quantile(chl[sel_mask], quantile)),
+                     chl_max[i] - max_drop)
+        chl_mask &= chl > chl_th
+
     sel_mask &= chl_mask
     nr_sel = np.count_nonzero(sel_mask)
     logger.info(f'num selected pixels: {nr_sel}')

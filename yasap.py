@@ -7,7 +7,7 @@ from libyasap.star_point import StarPointRefiner
 from libyasap.config import AlignmentConfig
 from libyasap.stacker import StackerBase, STACKER_DICT
 from libyasap.utils import (setup_logger, logger, save_img, disp_img,
-                            set_use_rigid)
+                            set_use_restricted_transform)
 from libyasap.postprocess import run_postprocess
 
 import numpy as np
@@ -67,9 +67,10 @@ def main():
     parser.add_argument('--only-stack', action='store_true',
                         help='only do the stack part, assuming images have '
                         'been aligned')
-    parser.add_argument('--use-rigid-transform', action='store_true',
-                        help='use 4-DOF rigid transform instead of 8-DOF '
-                        'homography')
+    parser.add_argument('--use-restricted-transform',
+                        help='use 3-DOF focal-point-rotation transform instead'
+                        ' of 8-DOF homography; arguments is'
+                        ' sensor_width:focoal_len.')
     parser.add_argument('--log', help='also write log to file')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='visualize internal results')
@@ -85,8 +86,8 @@ def main():
         assert len(args.imgs) == 1, 'only one input can be provided'
         return run_postprocess(args.postprocess, args.imgs[0], args.output)
 
-    if args.use_rigid_transform:
-        set_use_rigid(True)
+    if (p := args.use_restricted_transform):
+        set_use_restricted_transform(*map(float, p.split(':')))
 
     if len(args.imgs) == 1 and args.imgs[0].startswith('@'):
         with open(args.imgs[0][1:]) as fin:
@@ -105,7 +106,7 @@ def main():
     stacker.set_config(StackerBase.Config().update_from_args(args))
     discard_list = []
     for idx, path in enumerate(args.imgs):
-        logger.info('working on '
+        logger.info('=====> working on '
                     f'{idx}({idx-len(discard_list)})/{len(args.imgs)}: {path}')
         gc.collect()
         if args.only_stack:

@@ -85,6 +85,9 @@ class ConfigWithArgparse:
 class AlignmentConfig(ConfigWithArgparse):
     """default configuration options"""
 
+    use_xfeat = False
+    """whether to use xfeat for coarse matching"""
+
     apply_lens_correction = False
     """whether to apply lens correction on the input images"""
 
@@ -95,14 +98,29 @@ class AlignmentConfig(ConfigWithArgparse):
     """maximal distance of coordinates between matched feature points, relative
     to image width"""
 
+    mask_moving = False
+    """whether the mask should be moved to a coarse position on the current
+    image by using previous transform"""
+
     draw_matches = False
-    """weather to draw match points"""
+    """whether to draw coarse match points"""
+
+    draw_matches_no_wait = False
+    """whether to not wait key when drawing match points"""
+
+    linear_trans_before_ftr_match = False
+    """whether to apply a linear transform to the gray image before feature
+    computation and matching"""
+
+    homography_rotation_interpolation = False
+    """whether to enable interpolation of the rotation in homography; requires
+    --use-restricted-transform"""
 
     save_refined_dir = ''
     """directory to save refined images"""
 
     skip_coarse_align = False
-    """weather to skip corse alignment process; useful for aligning the
+    """whether to skip corse alignment process; useful for aligning the
     foreground using optical flow (which is at roughly the same location on
     every image)"""
 
@@ -112,6 +130,9 @@ class AlignmentConfig(ConfigWithArgparse):
 
     hessian_thresh = 800
     """Hessian threshold for SURF"""
+
+    crop_all_imgs: str = ''
+    """set as x:y:w:h to crop all input images"""
 
     remove_bg = False
     """remove background in alignment before further processing"""
@@ -125,8 +146,14 @@ class AlignmentConfig(ConfigWithArgparse):
     preproc_contrast = 1.0
     """contrast change during preprocessing"""
 
+    preproc_gaussian: float = 0.0
+    """gaussian kernel std for blurring"""
+
     preproc_show = False
     """whether to show preprocessed image"""
+
+    star_quality_filter: float = 0.0
+    """if positive, will use star-point quality to filter images"""
 
     sparse_opt_quality_level = 0.3
     """quality level for feature selection in sparse optical flow"""
@@ -149,6 +176,9 @@ class AlignmentConfig(ConfigWithArgparse):
     use_identity_trans = False
     """use identity transform to denoise foreground image"""
 
+    refine_iters: int = 1
+    """number of refinement iterations"""
+
     refine_abort_thresh = .5
     """threshold for giving up on the current image"""
 
@@ -162,11 +192,14 @@ class AlignmentConfig(ConfigWithArgparse):
     """minimal ratio for the number of pixels belong to a star divided by the
     area of its bounding box"""
 
-    star_point_max_num = 50
+    star_point_max_num = 80
     """maximal number of star points"""
 
     star_point_disp = False
-    """weather to visualize the star points for StarPointRefiner"""
+    """whether to visualize the star points for StarPointRefiner"""
+
+    star_point_disp_no_wait = False
+    """whether not to wait for keyboard when displaying star points"""
 
     star_point_icp_max_dist_jump = 4.2
     """stop selecting points when distance increases by this factor compared to
@@ -175,8 +208,15 @@ class AlignmentConfig(ConfigWithArgparse):
     star_point_icp_max_iters = 100
     """max number of iterations for ICP in star point"""
 
-    star_point_icp_stop_err = 0.15
+    star_point_icp_stop_err = 0.1
     """average pixel error for the ICP to stop"""
+
+    star_point_refresh_ref_img: int = -1
+    """set to a positive number to refresh the reference image after this number
+    of iterations; useful for untracked imaging"""
+
+    star_point_refresh_ref_err_thresh: float = 0.45
+    """error threshold for setting an image as a reference image"""
 
     star_point_quality_max_drop = float('inf')
     """abandon the current image if the quality of star points compared to the
