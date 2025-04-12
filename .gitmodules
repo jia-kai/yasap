@@ -1,3 +1,6 @@
 [submodule "accelerated_features"]
 	path = accelerated_features
 	url = https://github.com/verlab/accelerated_features.git
+[submodule "controller/pyindi-client"]
+	path = controller/pyindi-client
+	url = https://github.com/indilib/pyindi-client.git

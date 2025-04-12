@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deep Sky Astrophotography Controller</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Deep Sky Astrophotography Controller</h1>
+
+        <div class="input-group">
+            <label for="current-time">Current Time:</label>
+            <input type="text" id="current-time" readonly>
+        </div>
+
+        <div class="input-group">
+            <label for="latitude">Latitude:</label>
+            <input type="number" id="latitude" step="0.0001" value="{{ config.latitude }}">
+        </div>
+
+        <div class="input-group">
+            <label for="longitude">Longitude:</label>
+            <input type="number" id="longitude" step="0.0001" value="{{ config.longitude }}">
+        </div>
+
+        <div class="input-group">
+            <label for="elevation">Elevation (meters):</label>
+            <input type="number" id="elevation" step="0.1" value="{{ config.elevation }}">
+        </div>
+
+        <div class="input-group">
+            <label for="mount-port">Mount Serial Port:</label>
+            <input type="text" id="mount-port" value="{{ config.mount_port }}">
+        </div>
+
+        <div class="input-group">
+            <label for="device-name">Device Name:</label>
+            <input type="text" id="device-name" value="{{ config.device_name }}">
+        </div>
+
+        <div class="input-group">
+            <label for="driver">Driver:</label>
+            <input type="text" id="driver" value="{{ config.driver }}">
+        </div>
+
+        <div class="button-group">
+            <button id="update-gps">Update GPS</button>
+            <button id="setup-mount">Setup Mount</button>
+        </div>
+    </div>
+
+    <div id="error-modal" class="modal">
+        <div class="modal-content">
+            <h2>Error</h2>
+            <p id="error-message"></p>
+            <button onclick="closeErrorModal()">Close</button>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

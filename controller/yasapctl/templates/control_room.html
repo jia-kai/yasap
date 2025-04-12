@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Room - Deep Sky Astrophotography Controller</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .log-container {
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+        
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .log-title {
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+        
+        .log-controls {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .log-display {
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            background-color: #000;
+            color: #0f0;
+            padding: 10px;
+            border-radius: 3px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .log-line {
+            margin: 2px 0;
+            border-bottom: 1px solid #333;
+        }
+        
+        .log-info {
+            color: #0f0;
+        }
+        
+        .log-warning {
+            color: #ff0;
+        }
+        
+        .log-error {
+            color: #f00;
+        }
+        
+        .log-debug {
+            color: #0ff;
+        }
+        
+        .auto-scroll {
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Control Room</h1>
+        
+        <div class="log-container">
+            <div class="log-header">
+                <div class="log-title">System Logs</div>
+                <div class="log-controls">
+                    <label class="auto-scroll">
+                        <input type="checkbox" id="auto-scroll" checked> Auto-scroll
+                    </label>
+                    <button id="clear-logs">Clear Display</button>
+                </div>
+            </div>
+            <div class="log-display" id="log-display"></div>
+        </div>
+    </div>
+
+    <script>
+        // Function to fetch and display logs
+        function fetchLogs() {
+            fetch('/api/get_logs')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        displayLogs(data.logs);
+                    }
+                })
+                .catch(error => console.error('Error fetching logs:', error));
+        }
+        
+        // Function to display logs in the log display area
+        function displayLogs(logs) {
+            const logDisplay = document.getElementById('log-display');
+            const autoScroll = document.getElementById('auto-scroll').checked;
+            
+            // Clear the display if the clear button was clicked
+            if (window.clearLogs) {
+                logDisplay.innerHTML = '';
+                window.clearLogs = false;
+            }
+            
+            // Add new logs
+            logs.forEach(log => {
+                const logLine = document.createElement('div');
+                logLine.className = 'log-line';
+                
+                // Determine log level for styling
+                if (log.includes(' - ERROR - ')) {
+                    logLine.classList.add('log-error');
+                } else if (log.includes(' - WARNING - ')) {
+                    logLine.classList.add('log-warning');
+                } else if (log.includes(' - DEBUG - ')) {
+                    logLine.classList.add('log-debug');
+                } else {
+                    logLine.classList.add('log-info');
+                }
+                
+                logLine.textContent = log;
+                logDisplay.appendChild(logLine);
+            });
+            
+            // Auto-scroll to bottom if enabled
+            if (autoScroll) {
+                logDisplay.scrollTop = logDisplay.scrollHeight;
+            }
+        }
+        
+        // Set up event listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initial fetch
+            fetchLogs();
+            
+            // Set up interval for fetching logs
+            setInterval(fetchLogs, 1000);
+            
+            // Clear logs button
+            document.getElementById('clear-logs').addEventListener('click', function() {
+                window.clearLogs = true;
+                fetchLogs();
+            });
+        });
+    </script>
+</body>
+</html> 
