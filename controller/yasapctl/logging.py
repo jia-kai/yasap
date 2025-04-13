@@ -54,7 +54,7 @@ class LogManager:
 
         # Set up the logger
         self.logger = logging.getLogger('yasap')
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(logging.DEBUG)
 
         # Create formatters
         file_formatter = logging.Formatter(

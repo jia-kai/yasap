@@ -39,9 +39,7 @@ document.getElementById('setup-mount').addEventListener('click', () => {
         latitude: parseFloat(document.getElementById('latitude').value),
         longitude: parseFloat(document.getElementById('longitude').value),
         elevation: parseFloat(document.getElementById('elevation').value),
-        mount_port: document.getElementById('mount-port').value,
-        device_name: document.getElementById('device-name').value,
-        driver: document.getElementById('driver').value
+        mount_port: document.getElementById('mount-port').value
     };
 
     fetch('/api/setup_mount', {

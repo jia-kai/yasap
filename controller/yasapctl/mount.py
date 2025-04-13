@@ -1,37 +1,37 @@
 from .logging import LogManager
-from .indi_helper import IndiServerManager, IndiClient, IndiDeviceEx
+from .ioptron import MountClient, TcpComm, SerialComm, TimeInterface
 
-from astropy.utils import iers
-iers.conf.auto_download = False
-from astropy.utils.iers import conf
-conf.auto_max_age = None
+#from astropy.utils import iers
+#iers.conf.auto_download = False
+#from astropy.utils.iers import conf
+#conf.auto_max_age = None
 from astropy.time import Time
 from astropy.coordinates import EarthLocation
 from astropy import units as u
-import PyIndi
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from typing import Optional, ClassVar, Type, Self
-import time
+
+class SystemTime(TimeInterface):
+    """Time interface that uses the system time."""
+
+    def get(self) -> datetime:
+        """Get the current system time in the local timezone."""
+        return datetime.now()
 
 class MountController:
     """Controller for mount operations."""
 
     _instance: ClassVar[Optional['MountController']] = None
 
-    _client: IndiClient
     _logger: LogManager
-    _device_name: str
-    _driver: str
-    _server_manager: IndiServerManager
-    _device: IndiDeviceEx
+    _mount_client: MountClient
     _time_local: datetime
     _latitude: float
     _longitude: float
     _elevation: float
 
     def __init__(self, latitude: float, longitude: float, elevation: float, mount_port: str,
-                 device_name: str, driver: str,
                  time_local: Optional[datetime] = None):
         """Initialize the mount controller.
 
@@ -39,9 +39,7 @@ class MountController:
             latitude: Mount latitude
             longitude: Mount longitude
             elevation: Mount elevation in meters
-            mount_port: Port for mount connection
-            device_name: INDI device name
-            driver: INDI driver name
+            mount_port: Port for mount connection (e.g., 'tcp://10.10.100.254:8899' or '/dev/ttyUSB0')
             time_local: Optional local time to set on the mount. If None, current local time is used.
         """
 
@@ -50,17 +48,12 @@ class MountController:
 
         type(self)._instance = self
         self._logger = LogManager.get_instance()
-        self._device_name = device_name
-        self._driver = driver
         self._time_local = time_local or datetime.now()
         self._latitude = latitude
         self._longitude = longitude
         self._elevation = elevation
 
-        # Create and start the INDI server manager
-        self._server_manager = IndiServerManager(driver, self._logger)
-
-        # Connect to the server
+        # Connect to the mount
         self._connect(mount_port)
 
     def local_sidereal(self) -> float:
@@ -71,9 +64,9 @@ class MountController:
         """
         # Create an EarthLocation object with the mount's coordinates
         location = EarthLocation(
-            lat=self._latitude * u.deg,
-            lon=self._longitude * u.deg,
-            height=self._elevation * u.m
+            lat=self._latitude * u.deg,     # type: ignore
+            lon=self._longitude * u.deg,    # type: ignore
+            height=self._elevation * u.m    # type: ignore
         )
 
         # Create a Time object from the current local time
@@ -84,18 +77,14 @@ class MountController:
 
         # Convert to hours (0-24)
         lst_hours = lst.hour
-        return lst_hours
+        return float(lst_hours) # type: ignore
 
-    def set_tracking(self, flag: bool, *, timeout: float=5.0):
-        """set whether to be in tracking mode"""
-        t = self._device.getSwitch('TELESCOPE_TRACK_STATE')
+    def set_tracking(self, flag: bool):
+        """Set whether to be in tracking mode."""
         if flag:
-            t[0].setState(PyIndi.ISS_ON)
-            t[1].setState(PyIndi.ISS_OFF)
+            self._mount_client.start_1x_tracking()
         else:
-            t[0].setState(PyIndi.ISS_OFF)
-            t[1].setState(PyIndi.ISS_ON)
-        self._client.chkSendNewSwitch(t, timeout=timeout)
+            self._mount_client.stop_tracking()
 
     def _log_and_raise(self, msg: str,
                        exc_class: Type[Exception] = RuntimeError):
@@ -110,105 +99,30 @@ class MountController:
         raise exc_class(msg)
 
     def _connect(self, mount_port: str):
-        """Connect to the INDI server."""
-        client = self._client = IndiClient()
-        client.setServer('localhost', 7624)
+        """Connect to the mount."""
+        self._logger.info(f"Connecting to mount at {mount_port}")
 
-        # Retry connection up to 5 times
-        for attempt in range(5):
-            if client.connectServer():
-                self._logger.info("Connected to INDI server")
-                break
-
-            self._logger.warning(
-                f"Failed to connect to INDI server (attempt {attempt+1}/5)")
-            time.sleep(0.5)
-        else:
-            self._log_and_raise(
-                "Failed to connect to INDI server after 5 attempts",
-                ConnectionError)
-
-        # Get the extended device
-        device = self._device = client.getDeviceEx(self._device_name)
-
-        # Set the device port before connecting
-        self._logger.info(f"Setting device port to {mount_port}")
-        if mount_port.startswith('/dev'):
-            device_port = device.getText('DEVICE_PORT')
-            device_port[0].setText(mount_port)
-            client.chkSendNewText(device_port)
-            self._logger.info(f"Device port set to {mount_port}")
-        elif mount_port.startswith('tcp://'):
+        # Create the appropriate communication interface
+        if mount_port.startswith('tcp://'):
+            # Parse TCP connection string
             host, port = mount_port[6:].split(':')
-            mode = device.getSwitch('CONNECTION_MODE')
-            assert mode[0].getName() == 'CONNECTION_SERIAL'
-            mode[0].setState(PyIndi.ISS_OFF)
-            mode[1].setState(PyIndi.ISS_ON)
-            client.chkSendNewSwitch(mode)
-            addr = device.getText('DEVICE_ADDRESS')
-            addr[0].setText(host)
-            addr[1].setText(port)
-            client.chkSendNewText(addr)
+            comm = TcpComm(host, int(port))
+        else:
+            # Assume it's a serial port
+            comm = SerialComm(mount_port)
 
+        # Create the time interface
+        time_interface = SystemTime()
 
-        # Connect to the device if not already connected
-        if not device.isConnected():
-            self._logger.info(f"Connecting to device {self._device_name}...")
-            connection = device.getSwitch('CONNECTION')
-            connection[0].setState(PyIndi.ISS_ON)  # CONNECT
-            connection[1].setState(PyIndi.ISS_OFF)  # DISCONNECT
-            client.chkSendNewSwitch(connection)
+        # Create the mount client
+        self._mount_client = MountClient(
+            comm=comm,
+            time=time_interface,
+            longitude=self._longitude,
+            latitude=self._latitude
+        )
 
-        # iOptronV3 initialization is slow
-        self.set_tracking(False, timeout=20.0)
-
-        # Set the time on the mount
-        self._setup_time()
-
-        # Set the location on the mount
-        self._setup_location()
-
-        self._logger.info(
-            f"Successfully connected to device {self._device_name}")
-
-    def _setup_location(self):
-        """Set the latitude, longitude, and elevation on the mount."""
-        # Get the GEOGRAPHIC_COORD property
-        geo_coord = self._device.getNumber('GEOGRAPHIC_COORD')
-
-        # Set the latitude, longitude, and elevation
-        geo_coord[0].setValue(self._latitude)  # Latitude
-        geo_coord[1].setValue(self._longitude)  # Longitude
-        geo_coord[2].setValue(self._elevation)  # Elevation
-
-        self._logger.info(
-            "Set mount location:"
-            f" lat={self._latitude}, lon={self._longitude}, elev={self._elevation}")
-
-        # Send the new coordinates
-        self._client.chkSendNewNumber(geo_coord)
-
-    def _setup_time(self):
-        """Set the UTC time and UTC offset on the mount."""
-        self._logger.info(f"attempt to set time to {self._time_local}")
-        time_utc = self._device.getText('TIME_UTC')
-
-        # Convert local time to UTC and format in ISO 8601
-        utc_time = self._time_local.astimezone(timezone.utc)
-        time_str = utc_time.strftime("%Y-%m-%dT%H:%M:%S")
-        time_utc[0].setText(time_str)
-
-        # Calculate UTC offset in hours (positive for timezones east of UTC)
-        utc_offset = self._time_local.utcoffset()
-        if utc_offset is None:
-            utc_offset = timedelta(hours=0)  # Default to UTC if no offset
-        offset_hours = utc_offset.total_seconds() / 3600
-        time_utc[1].setText(f"{offset_hours:+.1f}")
-
-        self._client.chkSendNewText(time_utc)
-        self._logger.info(
-            f"Set mount UTC time to {time_str} with UTC offset"
-            f" {offset_hours:+.1f}")
+        self._logger.info("Successfully connected to mount")
 
     @classmethod
     def setup(cls, **kwargs) -> Self:
@@ -227,15 +141,10 @@ class MountController:
         instance = cls._instance
         logger = instance._logger
 
-        # Disconnect from the server
-        if hasattr(instance, '_client'):
-            logger.info("Disconnecting from INDI server")
-            instance._client.disconnectServer()
-
-        # Shutdown the server manager
-        if hasattr(instance, '_server_manager') and instance._server_manager:
-            logger.info("Shutting down INDI server manager")
-            instance._server_manager.shutdown()
+        # Close the mount connection
+        if hasattr(instance, '_mount_client'):
+            logger.info("Closing mount connection")
+            instance._mount_client.comm.close()
 
         # Reset the instance
         cls._instance = None
@@ -248,40 +157,21 @@ class MountController:
 
     def goto_coordinates(self, ra: float, dec: float, track: bool = True):
         """Go to the specified coordinates."""
+        self._logger.info(f"Goto command sent: RA={ra}, DEC={dec}, Track={track}")
 
-        # Set the ON_COORD_SET switch
-        on_coord_set = self._device.getSwitch('ON_COORD_SET')
+        # Go to the coordinates
+        self._mount_client.goto(ra, dec)
 
-        # Configure tracking behavior
-        on_coord_set[0].setState(
-            PyIndi.ISS_ON if track else PyIndi.ISS_OFF)  # TRACK
-        on_coord_set[1].setState(PyIndi.ISS_ON)  # SLEW
-        on_coord_set[2].setState(PyIndi.ISS_OFF)  # SYNC
-
-        # Send the new switch values
-        self._client.chkSendNewSwitch(on_coord_set)
-
-        # Set the coordinates
-        radec = self._device.getNumber('EQUATORIAL_EOD_COORD')
-        radec[0].setValue(ra)
-        radec[1].setValue(dec)
-
-        self._logger.info(
-            f"Goto command sent: RA={ra}, DEC={dec}, Track={track}")
-
-        # Send the new coordinates
-        self._client.chkSendNewNumber(radec, timeout=120.0)
+        if track:
+            self._mount_client.start_1x_tracking()
+        else:
+            self._mount_client.stop_tracking()
 
         self._logger.info("Goto completed successfully")
 
     def reset_home(self):
-        """Set the mount's current position as its home position"""
-        # Get the ON_COORD_SET switch
-        home = self._device.getSwitch('TELESCOPE_HOME')
-        home[0].setState(PyIndi.ISS_OFF)    # FIND
-        home[1].setState(PyIndi.ISS_ON)     # SET
-        home[2].setState(PyIndi.ISS_OFF)    # GO
-        self._client.chkSendNewSwitch(home)
+        """Set the mount's current position as its home position."""
+        #self._mount_client.reset_coord(180, 0)
 
     def get_current_coord(self):
         """Get the current coordinates of the mount.
@@ -289,11 +179,15 @@ class MountController:
         Returns:
             tuple: A tuple containing (ra, dec) in degrees
         """
-        # Get the current coordinates
-        radec = self._device.getNumber('EQUATORIAL_EOD_COORD')
+        return self._mount_client.get_coord()
 
-        # Extract RA and DEC values
-        ra = radec[0].getValue()
-        dec = radec[1].getValue()
+    def get_state(self):
+        """Get the current state of the mount.
 
-        return (ra, dec)
+        Returns:
+            SystemState: The current state of the mount
+        """
+        return self._mount_client.get_state()
+
+    def jitter(self, ra_ms: int, dec_ms: int):
+        self._mount_client.jitter(ra_ms, dec_ms)

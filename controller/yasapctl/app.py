@@ -12,11 +12,10 @@ from pathlib import Path
 # Default configuration
 DEFAULT_CONFIG = {
     'latitude': 43.6532,  # Toronto coordinates
-    'longitude': (-79.3832) % 360,
+    'longitude': -79.3832,
     'elevation': 76,  # Toronto elevation in meters
-    'mount_port': 'tcp://10.10.100.254:8899',
-    'device_name': 'iOptronV3',
-    'driver': 'indi_ioptronv3_telescope'
+    #'mount_port': 'tcp://10.10.100.254:8899',
+    'mount_port': '/dev/ttyUSB0'
 }
 
 # Initialize logger
@@ -103,9 +102,7 @@ def create_app(test_config=None):
             'latitude': float(data['latitude']),
             'longitude': float(data['longitude']),
             'elevation': float(data['elevation']),
-            'mount_port': data['mount_port'],
-            'device_name': data['device_name'],
-            'driver': data['driver']
+            'mount_port': data['mount_port']
         }
 
         logger.info(f"Setting up mount with config: {config}")
